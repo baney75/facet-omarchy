@@ -19,16 +19,5 @@ EOF
 ln -sf "$root/bin/facet" "$HOME/.local/bin/facet"
 install -Dm644 "$root/assets/facet.png" "$HOME/.local/share/icons/hicolor/256x256/apps/facet-omarchy.png"
 install -d "$HOME/.local/share/applications"
-cat > "$HOME/.local/share/applications/facet-omarchy.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Facet
-Comment=Facet browser
-Exec=$root/bin/facet %U
-Icon=facet-omarchy
-Terminal=false
-Categories=Network;WebBrowser;
-MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/facet;
-StartupWMClass=facet-omarchy
-EOF
+"$root/scripts/install-native.sh"
 echo "Installed. Run: facet"
