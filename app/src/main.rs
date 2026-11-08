@@ -12,6 +12,8 @@ use {libadwaita as adw, gtk4 as gtk};
 const APP_ID: &str = "app.panes.browser";
 const SPACE_TINTS: usize = 6;
 const MAX_COMMAND_RESULTS: usize = 8;
+const MAX_HISTORY_RESULTS: usize = 3;
+const MAX_HISTORY: usize = 5000;
 const COMMANDS: &[(&str, &str, &str)] = &[
     ("New Space", "new-space", "list-add-symbolic"),
     ("Add or Remove Favorite", "favorite", "starred-symbolic"),
@@ -59,11 +61,20 @@ const PAGE_IDLE: &[&str] = &[
     include_str!("../../extension/page/peek.js"),
 ];
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Target {
     Typed,
     Tab(usize, usize),
+    History(String),
     Action(&'static str),
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Visit {
+    url: String,
+    title: String,
+    /// Seconds since the Unix epoch.
+    last_visit: i64,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -135,6 +146,8 @@ struct Browser {
     network: webkit6::NetworkSession,
     content: webkit6::UserContentManager,
     page_store: RefCell<serde_json::Map<String, serde_json::Value>>,
+    // Newest first.
+    history: RefCell<Vec<Visit>>,
     spaces: RefCell<Vec<Space>>,
     favorites: RefCell<Vec<String>>,
     active: Cell<usize>,
@@ -154,6 +167,10 @@ fn session_path() -> PathBuf {
 
 fn page_store_path() -> PathBuf {
     data_dir().join("page-store.json")
+}
+
+fn history_path() -> PathBuf {
+    data_dir().join("history.json")
 }
 
 fn host_of(url: &str) -> Option<String> {
@@ -536,6 +553,23 @@ impl Browser {
         }
     }
 
+    /// Remembers a finished page load. Internal pages and anything but http(s) are never recorded.
+    fn record_visit(&self, url: &str, title: &str) {
+        if is_internal(url) || !(url.starts_with("http://") || url.starts_with("https://")) {
+            return;
+        }
+        let now = glib::real_time() / 1_000_000;
+        let mut history = self.history.borrow_mut();
+        let title = if title.is_empty() { history.iter().find(|v| v.url == url).map(|v| v.title.clone()).unwrap_or_default() } else { title.to_string() };
+        history.retain(|v| v.url != url);
+        history.insert(0, Visit { url: url.to_string(), title, last_visit: now });
+        history.truncate(MAX_HISTORY);
+        let _ = std::fs::create_dir_all(data_dir());
+        if let Ok(json) = serde_json::to_vec(&*history) {
+            let _ = std::fs::write(history_path(), json);
+        }
+    }
+
     fn toast(&self, text: &str) {
         self.toasts.add_toast(adw::Toast::new(text));
     }
@@ -701,11 +735,14 @@ impl Browser {
             }
         });
         let this = Rc::downgrade(self);
-        view.connect_load_changed(move |_, event| {
+        view.connect_load_changed(move |v, event| {
             let Some(this) = this.upgrade() else { return };
             this.sync_progress();
             if event == webkit6::LoadEvent::Finished {
                 this.save();
+                if let Some(url) = v.uri() {
+                    this.record_visit(&url, &v.title().unwrap_or_default());
+                }
                 if this.smoke.replace(false) {
                     println!("first page loaded in {} ms", this.started.elapsed().as_millis());
                     match std::env::var("FACET_SHOT_DIR") {
@@ -909,6 +946,16 @@ impl Browser {
             add(&tab.title(), "Switch to Tab", icon, Target::Tab(space, index));
             shown += 1;
         }
+        if !query.is_empty() {
+            let open: Vec<String> = spaces.iter().flat_map(|s| s.tabs.iter()).filter_map(Tab::url).collect();
+            let history = self.history.borrow();
+            let matches = history.iter().filter(|v| !open.contains(&v.url) && format!("{} {}", v.title, v.url).to_lowercase().contains(&query));
+            for visit in matches.take(MAX_HISTORY_RESULTS.min(MAX_COMMAND_RESULTS - 2 - shown)) {
+                let title = if visit.title.is_empty() { visit.url.as_str() } else { visit.title.as_str() };
+                add(title, "History", gtk::Image::from_icon_name("document-open-recent-symbolic"), Target::History(visit.url.clone()));
+                shown += 1;
+            }
+        }
         for (title, action, icon) in COMMANDS.iter().filter(|(title, _, _)| title.to_lowercase().contains(&query)).take(MAX_COMMAND_RESULTS - shown) {
             add(title, "Command", gtk::Image::from_icon_name(icon), Target::Action(action));
         }
@@ -917,13 +964,16 @@ impl Browser {
     }
 
     fn run_command(self: &Rc<Self>, index: i32) {
-        let target = self.command.targets.borrow().get(index as usize).copied();
+        let target = self.command.targets.borrow().get(index as usize).cloned();
         let text = self.command.entry.text().to_string();
         self.command.root.set_visible(false);
         match target {
             Some(Target::Tab(space, tab)) => self.show_tab(space, tab),
-            Some(Target::Typed) => {
-                let url = resolve_input(&text);
+            Some(target @ (Target::Typed | Target::History(_))) => {
+                let url = match target {
+                    Target::History(url) => url,
+                    _ => resolve_input(&text),
+                };
                 match self.current_view().filter(|_| !self.command.opens_new_tab.get()) {
                     Some(view) => view.load_uri(&url),
                     None => self.open_tab(&url),
@@ -1163,6 +1213,7 @@ impl Browser {
         }
         // A hostile link must reach the handler as data and leave the script intact.
         self.run_page_action("copyCleanLink", Some(serde_json::json!({ "linkUrl": "https://example.com/?a=\"');throw 1;//" })));
+        self.smoke_history();
         self.smoke_peek().await;
         self.open_tab("about:blank");
         self.cycle_tab(1);
@@ -1185,6 +1236,28 @@ impl Browser {
         println!("smoke script ok: {} spaces", self.spaces.borrow().len());
         let window = self.window.clone();
         glib::timeout_add_seconds_local_once(3, move || window.close());
+    }
+
+    /// A recorded visit must come back as a History row, internal pages must not be recorded, and the cap must hold.
+    fn smoke_history(self: &Rc<Self>) {
+        assert!(self.history.borrow().iter().any(|v| v.url.starts_with("https://example.com")), "the loaded page was not recorded");
+        self.record_visit("https://history.test/zebra-crossing", "Zebra Crossing Guide");
+        self.record_visit("facet://start/?tint=0", "Start");
+        self.record_visit("about:blank", "");
+        assert!(!self.history.borrow().iter().any(|v| is_internal(&v.url)), "an internal page was recorded");
+        for n in 0..MAX_HISTORY + 20 {
+            self.record_visit(&format!("https://history.test/bulk/{n}"), "Bulk");
+        }
+        assert_eq!(self.history.borrow().len(), MAX_HISTORY, "history cap");
+        self.record_visit("https://history.test/zebra-crossing", "Zebra Crossing Guide");
+        self.open_command(false);
+        self.command.entry.set_text("zebra");
+        let found = self.command.targets.borrow().iter().any(|t| matches!(t, Target::History(url) if url == "https://history.test/zebra-crossing"));
+        assert!(found, "visited URL missing from palette results");
+        self.close_command();
+        let saved: Vec<Visit> = serde_json::from_slice(&std::fs::read(history_path()).expect("history.json")).expect("history.json parses");
+        assert_eq!(saved.len(), MAX_HISTORY);
+        println!("history ok: visit found in palette, {} entries on disk, internal pages skipped", saved.len());
     }
 
     /// Link previews: private targets are refused, a real page is titled, and the page bridge delivers both answers.
@@ -1425,6 +1498,7 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
         network: network.clone(),
         content: content.clone(),
         page_store: RefCell::new(std::fs::read(page_store_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()),
+        history: RefCell::new(std::fs::read(history_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()),
         spaces: RefCell::new(Vec::new()),
         favorites: RefCell::new(Vec::new()),
         active: Cell::new(0),
