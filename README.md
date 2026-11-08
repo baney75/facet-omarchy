@@ -24,7 +24,7 @@ Requires Chromium, [uv](https://docs.astral.sh/uv/), and optionally Ollama.
 facet
 ```
 
-For the AI panel, start Ollama with `OLLAMA_ORIGINS=chrome-extension://*`.
+The AI panel uses your local Ollama at `127.0.0.1:11434` with no service changes.
 
 ## Architecture
 

@@ -31,7 +31,8 @@
     "tabCapture",
     "offscreen",
     "search",
-    "topSites"
+    "topSites",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "<all_urls>"
