@@ -4,3 +4,5 @@ docs/modules.txt
 docs/commands.txt
 docs/urls.txt
 docs/wave*.md
+
+app/target/
