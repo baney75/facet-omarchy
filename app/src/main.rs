@@ -27,6 +27,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("Copy Page as Markdown", "page-copyPageMarkdown", "edit-copy-symbolic"),
     ("Copy Clean Link", "page-copyCleanLink", "insert-link-symbolic"),
     ("Copy Markdown Link", "page-copyMarkdownLink", "insert-link-symbolic"),
+    ("Translate Page", "translate", "preferences-desktop-locale-symbolic"),
     ("Picture in Picture", "page-videoPip", "video-display-symbolic"),
 ];
 const CONTEXT_ACTIONS: &[(&str, &str)] = &[
@@ -39,6 +40,9 @@ const CONTEXT_ACTIONS: &[(&str, &str)] = &[
     ("Dark Mode for This Site", "toggleDark"),
     ("Calm Mode for This Site", "toggleCalm"),
 ];
+const TRANSLATE_JS: &str = include_str!("translate.js");
+const TRANSLATE_BATCH_CHARS: usize = 2000;
+const TRANSLATE_TIMEOUT: Duration = Duration::from_secs(600);
 const PEEK_TIMEOUT: Duration = Duration::from_secs(6);
 const PEEK_MAX_BYTES: usize = 200_000;
 const PEEK_MAX_HOPS: usize = 5;
@@ -137,6 +141,7 @@ struct Browser {
     next_id: Cell<u64>,
     started: Instant,
     smoke: Cell<bool>,
+    translating: Cell<bool>,
 }
 
 fn data_dir() -> PathBuf {
@@ -374,6 +379,90 @@ async fn peek(url: &str) -> serde_json::Value {
         Ok(Err(error)) => serde_json::json!({ "ok": false, "error": error }),
         Err(_) => serde_json::json!({ "ok": false, "error": "timed out" }),
     }
+}
+
+/// Where install.sh puts the wrapper that runs native/facet_host.py with its own Python.
+fn host_path() -> PathBuf {
+    std::env::var_os("FACET_HOST").map(PathBuf::from).unwrap_or_else(|| glib::user_data_dir().join("facet-omarchy/facet-host"))
+}
+
+fn target_language() -> String {
+    let from_locale = std::env::var("LANG").ok().map(|l| l.chars().take_while(|c| c.is_ascii_lowercase()).collect::<String>()).filter(|l| l.len() == 2 && l != "C");
+    std::env::var("FACET_TRANSLATE_TARGET").ok().or(from_locale).unwrap_or_else(|| "en".into())
+}
+
+/// Native messaging framing: a 4 byte native-endian length, then JSON.
+fn host_frame(message: &serde_json::Value) -> Vec<u8> {
+    let body = message.to_string().into_bytes();
+    let mut frame = (body.len() as u32).to_ne_bytes().to_vec();
+    frame.extend(body);
+    frame
+}
+
+fn host_replies(mut bytes: &[u8]) -> Vec<serde_json::Value> {
+    let mut replies = Vec::new();
+    while bytes.len() >= 4 {
+        let size = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        let Some(body) = bytes.get(4..4 + size) else { break };
+        let Ok(reply) = serde_json::from_slice(body) else { break };
+        replies.push(reply);
+        bytes = &bytes[4 + size..];
+    }
+    replies
+}
+
+/// Translates each text through the host, batching lines so one process and one model load serve the page.
+/// Returns the translations and how many texts were left as they were.
+async fn translate_texts(texts: &[String], source: Option<&str>, target: &str) -> Result<(Vec<String>, usize), String> {
+    let mut batches: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut start = 0;
+    let mut size = 0;
+    for (index, text) in texts.iter().enumerate() {
+        if size > 0 && size + text.len() > TRANSLATE_BATCH_CHARS {
+            batches.push(start..index);
+            start = index;
+            size = 0;
+        }
+        size += text.len() + 1;
+    }
+    batches.push(start..texts.len());
+    let mut request = Vec::new();
+    for (id, range) in batches.iter().enumerate() {
+        let mut message = serde_json::json!({ "id": id, "action": "translate", "text": texts[range.clone()].join("\n"), "target": target });
+        if let Some(source) = source {
+            message["source"] = source.into();
+        }
+        request.extend(host_frame(&message));
+    }
+    let host = host_path();
+    if !host.exists() {
+        return Err("Translation is not installed. Run install.sh".into());
+    }
+    let process = gio::Subprocess::newv(&[host.as_os_str()], gio::SubprocessFlags::STDIN_PIPE | gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_SILENCE).map_err(|e| e.message().to_string())?;
+    let answered = glib::future_with_timeout(TRANSLATE_TIMEOUT, process.communicate_future(Some(&glib::Bytes::from_owned(request)))).await;
+    let Ok(answered) = answered else {
+        process.force_exit();
+        return Err("Translation timed out".into());
+    };
+    let (stdout, _) = answered.map_err(|e| e.message().to_string())?;
+    let replies = host_replies(&stdout.unwrap_or_else(|| glib::Bytes::from_static(b"")));
+    let mut out = texts.to_vec();
+    let mut skipped = 0;
+    for (id, range) in batches.iter().enumerate() {
+        let reply = replies.iter().find(|r| r["id"] == id).ok_or("Translation host stopped early")?;
+        if reply["ok"] != true {
+            return Err(reply["error"].as_str().unwrap_or("Translation failed").to_string());
+        }
+        let lines: Vec<&str> = reply["result"]["text"].as_str().unwrap_or_default().split('\n').collect();
+        if lines.len() == range.len() {
+            for (slot, line) in out[range.clone()].iter_mut().zip(lines) {
+                *slot = line.trim().to_string();
+            }
+        } else {
+            skipped += range.len();
+        }
+    }
+    Ok((out, skipped))
 }
 
 impl Browser {
@@ -849,6 +938,55 @@ impl Browser {
         }
     }
 
+    /// Translates the visible text of `view` into the user's language. Returns a short summary for a toast.
+    async fn translate_view(&self, view: &webkit6::WebView) -> Result<String, String> {
+        let collect = format!("{TRANSLATE_JS}\n__facetTranslate.collect()");
+        let collected = view.evaluate_javascript_future(&collect, Some(PAGE_WORLD), None).await.map_err(|e| e.message().to_string())?;
+        let page: serde_json::Value = serde_json::from_str(&collected.to_str()).map_err(|e| e.to_string())?;
+        let texts: Vec<String> = page["texts"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).collect();
+        if texts.is_empty() {
+            return Ok("Nothing to translate".into());
+        }
+        let target = target_language();
+        let source = page["lang"].as_str().and_then(|l| l.split('-').next()).filter(|l| l.len() == 2).map(str::to_lowercase);
+        if source.as_deref() == Some(target.as_str()) {
+            return Ok("This page is already in your language".into());
+        }
+        let (translated, skipped) = translate_texts(&texts, source.as_deref(), &target).await?;
+        let apply = format!("__facetTranslate.apply({})", serde_json::to_string(&translated).map_err(|e| e.to_string())?);
+        view.evaluate_javascript_future(&apply, Some(PAGE_WORLD), None).await.map_err(|e| e.message().to_string())?;
+        let mut summary = format!("Translated to {target}");
+        if skipped > 0 {
+            summary.push_str(&format!(", {skipped} passages left as written"));
+        }
+        if page["truncated"] == true {
+            summary.push_str(", first part of the page only");
+        }
+        Ok(summary)
+    }
+
+    fn translate_page(self: &Rc<Self>) {
+        let Some(view) = self.current_view() else { return };
+        if is_internal(&self.current_url()) {
+            self.toast("Open a site to translate it");
+            return;
+        }
+        if self.translating.replace(true) {
+            self.toast("Already translating this page");
+            return;
+        }
+        self.toast("Translating page, the first run can take a minute");
+        let this = self.clone();
+        glib::spawn_future_local(async move {
+            let result = this.translate_view(&view).await;
+            this.translating.set(false);
+            match result {
+                Ok(summary) => this.toast(&summary),
+                Err(error) => this.toast(&format!("Translation failed: {error}")),
+            }
+        });
+    }
+
     /// Runs a page handler in the isolated world; `arg` reaches it as the message object.
     fn run_page_action(&self, handler: &str, arg: Option<serde_json::Value>) {
         let Some(view) = self.current_view() else { return };
@@ -1064,7 +1202,20 @@ impl Browser {
         let answer = view.call_async_javascript_function_future(script, None, Some(PAGE_WORLD), None).await.map(|v| v.to_str().to_string()).unwrap_or_else(|e| e.to_string());
         let cards: Vec<serde_json::Value> = serde_json::from_str(&answer).unwrap_or_default();
         assert!(cards.len() == 2 && cards[0]["ok"] == true && cards[0]["title"] == "Example Domain" && cards[1]["ok"] == false, "bridge peek answered {answer}");
+        if std::env::var_os("FACET_SMOKE_TRANSLATE").is_some() {
+            self.smoke_translate(&view).await;
+        }
         println!("peek ok: private and non-http targets refused, bridge answered {answer}");
+    }
+
+    /// One real translation through the host: Spanish text is put on the page, translated, and read back.
+    async fn smoke_translate(&self, view: &webkit6::WebView) {
+        let setup = "document.body.innerHTML = '<h1>Buenos días</h1><p>El gato come pescado y bebe leche.</p>'; document.documentElement.lang = 'es'; 1";
+        view.evaluate_javascript_future(setup, Some(PAGE_WORLD), None).await.expect("translate setup");
+        let summary = self.translate_view(view).await.expect("translation failed");
+        let text = view.evaluate_javascript_future("document.body.innerText", Some(PAGE_WORLD), None).await.map(|v| v.to_str().to_string()).unwrap_or_default();
+        assert!(text.to_lowercase().contains("cat") && !text.contains("gato"), "page was not translated: {text:?}");
+        println!("translate ok: {summary}; page now reads {text:?}");
     }
 
     fn write_shot(&self, path: &std::path::Path) {
@@ -1280,6 +1431,7 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
         next_id: Cell::new(0),
         started,
         smoke: Cell::new(smoke),
+        translating: Cell::new(false),
     });
 
     let toggle = icon_button("sidebar-show-symbolic", "Toggle sidebar (Ctrl+B)");
@@ -1501,6 +1653,8 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     add_action(app, "previous-tab", &["<Ctrl><Shift>Tab"], move || b.cycle_tab(-1));
     let b = browser.clone();
     add_action(app, "new-space", &["<Ctrl><Shift>n"], move || b.new_space());
+    let b = browser.clone();
+    add_action(app, "translate", &[], move || b.translate_page());
     let b = browser.clone();
     add_action(app, "toggle-sidebar", &["<Ctrl>b"], move || { b.hover_revealed.set(false); b.set_sidebar(!b.sidebar.reveals_child()); });
     for number in 1..=9usize {
