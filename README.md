@@ -14,6 +14,9 @@ A GTK4 and libadwaita window around WebKitGTK, written in Rust (`app/`).
 | Context menu | The page tools above on right click, with the link under the pointer for the link actions |
 | Link peek | Hover preview with title, description and image. The fetch runs in the app, refuses private addresses and is limited to 6 seconds and 200 KB |
 | Translate Page | Palette command that translates page text on your machine with Argos Translate |
+| Themes | Eight themes shown through the sidebar and start page, `Ctrl+Shift+T` for the next one |
+| Ask Facet | `Ctrl+J`: streaming answers from a local Ollama model, no account |
+| Settings | `Ctrl+,`: search engine, sidebar side, ad blocking, first-run onboarding, a downloads list and Tidy for tabs |
 | History | Visits are kept in `history.json` in the app data directory (5000 newest) and searched from the palette |
 | Privacy | Ad and tracker blocking from compiled uBlock Origin Lite rulesets, tracking-parameter removal |
 
@@ -34,7 +37,8 @@ This builds the app, installs it as `~/.local/bin/facet`, and installs the compi
 - No browser extensions. The page tools are built in and share their scripts with the Chromium build.
 - Apple-only features have an equivalent or are absent. Absent: Handoff, iCloud Keychain and passkey sync, Touch ID, AirPlay, Siri. Equivalents: local Argos translation in place of Apple's translation, and a local history file in place of synced history.
 - Read aloud needs speech-dispatcher, which is not installed here, so the command is not offered.
-- No settings panel, downloads panel, AI panel or onboarding yet. Downloads save to your Downloads folder with a toast.
+- Not ported yet: live captions, Rewind, Panic key, Secret Favorites and Space lock, voice Talk, agents, a password manager, Tor, bookmark import and GitHub actions.
+- Ask Facet needs a local Ollama server with at least one model. It uses the first model Ollama lists.
 - Link peek checks the host's addresses before each request. A DNS answer that changes between that check and the connection is not covered.
 - Translate Page translates the first 20,000 characters of visible text. The first run for a language pair downloads a model, which can take a minute.
 
