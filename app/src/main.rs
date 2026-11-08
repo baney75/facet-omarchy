@@ -10,7 +10,16 @@ use webkit6::{prelude::*, soup};
 use {libadwaita as adw, gtk4 as gtk};
 
 const APP_ID: &str = "app.panes.browser";
-const SPACE_TINTS: usize = 6;
+const THEMES: &[(&str, &[u8])] = &[
+    ("Blue Hour", include_bytes!("themes/bluehour.jpg")),
+    ("Midnight", include_bytes!("themes/midnight.jpg")),
+    ("Graphite", include_bytes!("themes/graphite.jpg")),
+    ("Liquid Chrome", include_bytes!("themes/chrome.jpg")),
+    ("Iridescent", include_bytes!("themes/iridescent.jpg")),
+    ("Lilac", include_bytes!("themes/lilac.jpg")),
+    ("Moraine", include_bytes!("themes/moraine.jpg")),
+    ("Ember", include_bytes!("themes/ember.jpg")),
+];
 const MAX_COMMAND_RESULTS: usize = 8;
 const MAX_HISTORY_RESULTS: usize = 3;
 const MAX_HISTORY: usize = 5000;
@@ -80,6 +89,8 @@ struct Visit {
 #[derive(Serialize, Deserialize, Default)]
 struct SavedSpace {
     name: String,
+    #[serde(default)]
+    theme: usize,
     urls: Vec<String>,
 }
 
@@ -110,6 +121,7 @@ impl Tab {
 
 struct Space {
     name: String,
+    theme: usize,
     list: gtk::ListBox,
     tabs: Vec<Tab>,
 }
@@ -136,6 +148,9 @@ struct Browser {
     favorites_box: gtk::FlowBox,
     address: gtk::Entry,
     progress: gtk::ProgressBar,
+    wallpaper: gtk::Stack,
+    space_title: gtk::Label,
+    space_dot: gtk::Box,
     sidebar: gtk::Revealer,
     hover_revealed: Cell<bool>,
     favicons: Option<webkit6::FaviconDatabase>,
@@ -513,6 +528,7 @@ impl Browser {
             return;
         }
         let url = self.current_url();
+        self.address.set_visible(!is_internal(&url));
         let secure = url.starts_with("https://");
         self.address.set_icon_from_icon_name(gtk::EntryIconPosition::Primary, secure.then_some("changes-prevent-symbolic"));
         gtk::prelude::EntryExt::set_alignment(&self.address, 0.5);
@@ -520,12 +536,12 @@ impl Browser {
     }
 
     fn home_url(&self) -> String {
-        format!("facet://start/?tint={}", self.active.get() % SPACE_TINTS)
+        "facet://start/".to_string()
     }
 
     fn start_page(&self) -> String {
         let favorites = serde_json::to_string(&*self.favorites.borrow()).unwrap_or_else(|_| "[]".into()).replace('<', "\\u003c");
-        include_str!("start.html").replace("/*DATA*/", &format!("const FAVORITES={favorites};"))
+        include_str!("start.html").replace("/*DATA*/", &format!("const FAVORITES={favorites};const SEARCH=\"https://duckduckgo.com/?q=\";"))
     }
 
     fn sync_progress(&self) {
@@ -545,7 +561,7 @@ impl Browser {
         let session = Session {
             active: self.active.get(),
             favorites: self.favorites.borrow().clone(),
-            spaces: spaces.iter().map(|s| SavedSpace { name: s.name.clone(), urls: s.tabs.iter().filter_map(Tab::url).collect() }).collect(),
+            spaces: spaces.iter().map(|s| SavedSpace { name: s.name.clone(), theme: s.theme, urls: s.tabs.iter().filter_map(Tab::url).collect() }).collect(),
         };
         let _ = std::fs::create_dir_all(data_dir());
         if let Ok(json) = serde_json::to_string_pretty(&session) {
@@ -574,7 +590,7 @@ impl Browser {
         self.toasts.add_toast(adw::Toast::new(text));
     }
 
-    fn add_space(self: &Rc<Self>, name: &str) -> usize {
+    fn add_space(self: &Rc<Self>, name: &str, theme: usize) -> usize {
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Browse);
         let this = Rc::downgrade(self);
@@ -587,7 +603,7 @@ impl Browser {
         });
         let index = self.spaces.borrow().len();
         self.lists.add_named(&list, Some(&format!("space-{index}")));
-        self.spaces.borrow_mut().push(Space { name: name.to_string(), list, tabs: Vec::new() });
+        self.spaces.borrow_mut().push(Space { name: name.to_string(), theme: theme % THEMES.len(), list, tabs: Vec::new() });
         index
     }
 
@@ -595,25 +611,22 @@ impl Browser {
         while let Some(child) = self.switcher.first_child() {
             self.switcher.remove(&child);
         }
-        let names: Vec<String> = self.spaces.borrow().iter().map(|s| s.name.clone()).collect();
+        let names: Vec<(String, usize)> = self.spaces.borrow().iter().map(|s| (s.name.clone(), s.theme)).collect();
         let active = self.active.get();
-        for (index, name) in names.iter().enumerate() {
+        for (index, (name, theme)) in names.iter().enumerate() {
             let button = gtk::Button::new();
             button.add_css_class("flat");
             button.add_css_class("facet-space");
             button.set_tooltip_text(Some(name));
             if index == active {
-                button.set_label(name);
                 button.add_css_class("active");
-                button.add_css_class(&format!("tint-{}", index % SPACE_TINTS));
-            } else {
-                let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                dot.set_valign(gtk::Align::Center);
-                dot.set_halign(gtk::Align::Center);
-                dot.add_css_class("facet-dot");
-                dot.add_css_class(&format!("dot-{}", index % SPACE_TINTS));
-                button.set_child(Some(&dot));
             }
+            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            dot.set_valign(gtk::Align::Center);
+            dot.set_halign(gtk::Align::Center);
+            dot.add_css_class("facet-dot");
+            dot.add_css_class(&format!("dot-{theme}"));
+            button.set_child(Some(&dot));
             let this = Rc::downgrade(self);
             button.connect_clicked(move |_| {
                 if let Some(this) = this.upgrade() {
@@ -629,10 +642,7 @@ impl Browser {
             return;
         }
         self.active.set(index);
-        for tint in 0..SPACE_TINTS {
-            self.root.remove_css_class(&format!("space-tint-{tint}"));
-        }
-        self.root.add_css_class(&format!("space-tint-{}", index % SPACE_TINTS));
+        self.apply_theme();
         self.lists.set_visible_child_name(&format!("space-{index}"));
         if self.spaces.borrow()[index].tabs.is_empty() {
             self.open_tab(&self.home_url());
@@ -654,9 +664,47 @@ impl Browser {
         self.save();
     }
 
+    /// Shows the active Space's wallpaper; each image is decoded the first time it's used.
+    fn apply_theme(&self) {
+        let (name, theme) = {
+            let spaces = self.spaces.borrow();
+            let space = &spaces[self.active.get()];
+            (space.name.clone(), space.theme)
+        };
+        let page = format!("theme-{theme}");
+        if self.wallpaper.child_by_name(&page).is_none() {
+            let picture = gtk::Picture::new();
+            picture.set_content_fit(gtk::ContentFit::Cover);
+            picture.set_can_shrink(true);
+            if let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from_static(THEMES[theme].1)) {
+                picture.set_paintable(Some(&texture));
+            }
+            self.wallpaper.add_named(&picture, Some(&page));
+        }
+        self.wallpaper.set_visible_child_name(&page);
+        self.space_title.set_text(&name);
+        for index in 0..THEMES.len() {
+            self.space_dot.remove_css_class(&format!("dot-{index}"));
+        }
+        self.space_dot.add_css_class(&format!("dot-{theme}"));
+    }
+
+    fn set_space_theme(self: &Rc<Self>, theme: usize) {
+        self.spaces.borrow_mut()[self.active.get()].theme = theme % THEMES.len();
+        self.apply_theme();
+        self.render_switcher();
+        self.save();
+    }
+
+    fn go_home(&self) {
+        if let Some(view) = self.current_view() {
+            view.load_uri(&self.home_url());
+        }
+    }
+
     fn new_space(self: &Rc<Self>) {
         let number = self.spaces.borrow().len() + 1;
-        let index = self.add_space(&format!("Space {number}"));
+        let index = self.add_space(&format!("Space {number}"), number - 1);
         self.switch_space(index);
     }
 
@@ -1313,21 +1361,20 @@ impl Browser {
         self.favorites.borrow_mut().extend(["https://github.com/".to_string(), "https://news.ycombinator.com/".to_string()]);
         self.render_favorites();
         let this = self.clone();
-        glib::timeout_add_seconds_local_once(4, move || {
-            this.write_shot(&dir.join("main.png"));
-            this.open_tab(&this.home_url());
-            this.open_command(true);
-            let this2 = this.clone();
-            glib::timeout_add_seconds_local_once(3, move || {
-                this2.write_shot(&dir.join("command.png"));
-                this2.close_command();
-                this2.new_space();
-                let this3 = this2.clone();
-                glib::timeout_add_seconds_local_once(3, move || {
-                    this3.write_shot(&dir.join("space2.png"));
-                    this3.window.close();
-                });
-            });
+        let steps: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+        glib::timeout_add_seconds_local(4, move || {
+            let step = steps.replace(steps.get() + 1);
+            if step > 0 {
+                this.write_shot(&dir.join(format!("{}.png", step - 1)));
+            }
+            match step {
+                0 => { this.open_tab(&this.home_url()); }
+                1 => this.open_command(true),
+                2 => this.close_command(),
+                3..=6 => this.set_space_theme(step * 2 - 3),
+                _ => { this.window.close(); return glib::ControlFlow::Break; }
+            }
+            glib::ControlFlow::Continue
         });
     }
 
@@ -1339,14 +1386,14 @@ impl Browser {
         *self.favorites.borrow_mut() = session.favorites;
         self.render_favorites();
         if url_override.is_some() || session.spaces.is_empty() {
-            self.add_space("Space 1");
+            self.add_space("Space 1", 0);
             let home = self.home_url();
             self.open_tab(url_override.as_deref().unwrap_or(&home));
             self.switch_space(0);
             return;
         }
         for saved in &session.spaces {
-            let created = self.add_space(&saved.name);
+            let created = self.add_space(&saved.name, saved.theme);
             self.active.set(created);
             for url in &saved.urls {
                 self.add_restored_tab(url);
@@ -1409,9 +1456,10 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     pages.set_transition_type(gtk::StackTransitionType::Crossfade);
     pages.set_transition_duration(110);
     let lists = gtk::Stack::new();
-    lists.set_vexpand(true);
+    lists.set_vhomogeneous(false);
+    lists.set_interpolate_size(true);
     lists.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
-    lists.set_transition_duration(180);
+    lists.set_transition_duration(280);
     let switcher = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     switcher.set_hexpand(true);
     switcher.set_halign(gtk::Align::Center);
@@ -1479,6 +1527,16 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     sidebar_revealer.set_reveal_child(true);
     sidebar_revealer.set_hexpand(false);
 
+    let wallpaper = gtk::Stack::new();
+    wallpaper.set_transition_type(gtk::StackTransitionType::Crossfade);
+    wallpaper.set_transition_duration(450);
+    let space_title = gtk::Label::new(None);
+    space_title.set_xalign(0.0);
+
+    let space_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    space_dot.add_css_class("facet-dot");
+    space_dot.set_valign(gtk::Align::Center);
+
     let browser = Rc::new(Browser {
         window: window.clone(),
         root: root.clone(),
@@ -1488,6 +1546,9 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
         favorites_box: favorites_box.clone(),
         address: address.clone(),
         progress: progress.clone(),
+        wallpaper: wallpaper.clone(),
+        space_title: space_title.clone(),
+        space_dot: space_dot.clone(),
         sidebar: sidebar_revealer.clone(),
         hover_revealed: Cell::new(false),
         favicons,
@@ -1508,6 +1569,10 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
         translating: Cell::new(false),
     });
 
+    let space_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    space_header.add_css_class("facet-space-title");
+    space_header.append(&space_dot);
+    space_header.append(&space_title);
     let toggle = icon_button("sidebar-show-symbolic", "Toggle sidebar (Ctrl+B)");
     let back = icon_button("go-previous-symbolic", "Back");
     let forward = icon_button("go-next-symbolic", "Forward");
@@ -1523,7 +1588,7 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     let handle = gtk::WindowHandle::new();
     handle.set_child(Some(&nav));
 
-    let new_tab_label = gtk::Label::new(Some("New Tab"));
+    let new_tab_label = gtk::Label::new(Some("Add Tab"));
     new_tab_label.set_xalign(0.0);
     let new_tab_line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     new_tab_line.append(&gtk::Image::from_icon_name("list-add-symbolic"));
@@ -1535,13 +1600,20 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
 
     let add_space = icon_button("list-add-symbolic", "New Space (Ctrl+Shift+N)");
     let spaces_row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    let home = icon_button("go-home-symbolic", "Home");
+    let b = browser.clone();
+    home.connect_clicked(move |_| b.go_home());
+    spaces_row.append(&home);
     spaces_row.append(&switcher);
     spaces_row.append(&add_space);
 
     let scroller = gtk::ScrolledWindow::new();
     scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
     scroller.set_vexpand(true);
-    scroller.set_child(Some(&lists));
+    let tab_column = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    tab_column.append(&lists);
+    tab_column.append(&new_tab);
+    scroller.set_child(Some(&tab_column));
 
     let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 6);
     sidebar.add_css_class("facet-sidebar");
@@ -1549,9 +1621,9 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     sidebar.set_hexpand(false);
     sidebar.set_size_request(256, -1);
     sidebar.append(&handle);
+    sidebar.append(&space_header);
     sidebar.append(&address);
     sidebar.append(&favorites_box);
-    sidebar.append(&new_tab);
     sidebar.append(&scroller);
     sidebar.append(&spaces_row);
 
@@ -1563,7 +1635,11 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     root.append(&sidebar_revealer);
     root.append(&page_overlay);
     let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&root));
+    let backdrop = gtk::Overlay::new();
+    backdrop.set_child(Some(&wallpaper));
+    backdrop.add_overlay(&root);
+    backdrop.set_measure_overlay(&root, true);
+    overlay.set_child(Some(&backdrop));
     let edge = gtk::Box::new(gtk::Orientation::Vertical, 0);
     edge.set_halign(gtk::Align::Start);
     edge.set_size_request(6, -1);
@@ -1714,7 +1790,9 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     let b = browser.clone();
     add_action(app, "close-tab", &["<Ctrl>w"], move || b.close_current());
     let b = browser.clone();
-    add_action(app, "focus-address", &["<Ctrl>l"], move || { b.address.grab_focus(); });
+    add_action(app, "focus-address", &["<Ctrl>l"], move || {
+        if gtk::prelude::WidgetExt::is_visible(&b.address) { b.address.grab_focus(); } else { b.open_command(false); }
+    });
     let b = browser.clone();
     add_action(app, "reload", &["<Ctrl>r", "F5"], move || { if let Some(v) = b.current_view() { v.reload(); } });
     let b = browser.clone();

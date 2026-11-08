@@ -2,57 +2,48 @@
 <html><head><meta charset="utf-8"><title>New Tab</title>
 <meta name="color-scheme" content="light dark">
 <style>
-:root{--bg:#fbfbfd;--fg:#1d1d1f;--muted:#6e6e73;--line:rgba(0,0,0,.08);--chip:rgba(255,255,255,.62);--glow:.55}
-@media(prefers-color-scheme:dark){:root{--bg:#1c1c1e;--fg:#f5f5f7;--muted:#98989d;--line:rgba(255,255,255,.1);--chip:rgba(255,255,255,.07);--glow:.42}}
+:root{--bg:#f5f5f7;--fg:#1d1d1f;--muted:#6e6e73;--line:rgba(0,0,0,.14);--box:#fff;--tile:rgba(0,0,0,.05);--slab:rgba(0,0,0,.22)}
+@media(prefers-color-scheme:dark){:root{--bg:#363638;--fg:#f5f5f7;--muted:#98989d;--line:rgba(255,255,255,.1);--box:#1c1a1f;--tile:rgba(255,255,255,.08);--slab:rgba(255,255,255,.2)}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--fg);font-family:Inter,system-ui,sans-serif;overflow:hidden;display:flex;align-items:center;justify-content:center}
-.aurora{position:fixed;inset:-25%;filter:blur(90px);opacity:var(--glow);pointer-events:none}
-.aurora i{position:absolute;width:55%;height:55%;border-radius:50%;animation:drift 26s ease-in-out infinite alternate}
-.aurora i:nth-child(1){left:6%;top:4%;background:var(--a)}
-.aurora i:nth-child(2){right:4%;top:18%;background:var(--b);animation-delay:-9s}
-.aurora i:nth-child(3){left:28%;bottom:0;background:var(--c);animation-delay:-17s}
-@keyframes drift{to{transform:translate(9%,7%) scale(1.18)}}
-@media(prefers-reduced-motion:reduce){.aurora i,main{animation:none!important}}
-main{position:relative;width:min(640px,88vw);text-align:center;animation:rise .5s cubic-bezier(.2,.8,.2,1)}
-@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.985)}}
-#clock{font-size:clamp(64px,13vw,124px);font-weight:200;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums}
-#hello{margin:10px 0 34px;color:var(--muted);font-size:17px}
-form{display:flex;align-items:center;gap:12px;height:56px;padding:0 20px;border-radius:18px;background:var(--chip);border:1px solid var(--line);backdrop-filter:blur(24px);box-shadow:0 18px 50px rgba(0,0,0,.18);transition:box-shadow .18s,transform .18s}
-form:focus-within{transform:translateY(-1px);box-shadow:0 0 0 2px var(--a),0 22px 60px rgba(0,0,0,.26)}
-form svg{flex:none;opacity:.55}
-input{flex:1;min-width:0;border:0;outline:0;background:none;color:inherit;font:inherit;font-size:17px}
+body{background:var(--bg);color:var(--fg);font:15px/1.4 Inter,system-ui,sans-serif;letter-spacing:-.01em;display:flex;justify-content:center;padding-top:18vh;overflow:hidden}
+main{width:min(460px,86vw);animation:rise .5s cubic-bezier(.22,1,.36,1)}
+@keyframes rise{from{opacity:0;transform:translateY(10px) scale(.985)}}
+@media(prefers-reduced-motion:reduce){main{animation:none}}
+.slabs{display:block;width:132px;margin:0 auto 42px;fill:none;stroke:var(--slab);stroke-width:1.2;stroke-linejoin:round}
+form{border-radius:14px;background:var(--box);border:1px solid var(--line);box-shadow:0 18px 44px rgba(0,0,0,.28);padding:9px 8px 8px 16px;transition:box-shadow .2s cubic-bezier(.22,1,.36,1)}
+form:focus-within{box-shadow:0 0 0 1.5px #0a84ff,0 20px 50px rgba(0,0,0,.34)}
+.top{display:flex;align-items:center;gap:10px;height:34px}
+.top svg{flex:none;opacity:.6}
+input{flex:1;min-width:0;border:0;outline:0;background:none;color:inherit;font:inherit;font-size:15.5px}
 input::placeholder{color:var(--muted)}
-#tiles{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:34px}
-#tiles a{width:84px;color:inherit;text-decoration:none;font-size:12px;transition:transform .16s cubic-bezier(.2,.8,.2,1)}
-#tiles a:hover{transform:translateY(-4px) scale(1.05)}
-#tiles span{display:block;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
-.tile{display:grid;place-items:center;width:58px;height:58px;margin:auto;border-radius:16px;background:var(--chip);border:1px solid var(--line);font-size:23px;font-weight:600;overflow:hidden}
-.tile img{width:32px;height:32px}
-#hint{margin-top:30px;color:var(--muted);font-size:13px}
-kbd{padding:2px 6px;border-radius:5px;background:var(--chip);border:1px solid var(--line);font:inherit;font-size:12px}
+.row{display:flex;justify-content:flex-end;gap:6px;margin-top:4px}
+button{width:28px;height:28px;border:0;border-radius:50%;background:var(--tile);color:inherit;display:grid;place-items:center;cursor:pointer;transition:background .15s,transform .15s cubic-bezier(.22,1,.36,1)}
+button:hover{background:#0a84ff;color:#fff}
+button:active{transform:scale(.92)}
+#tiles{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:30px}
+#tiles a{width:68px;color:var(--muted);text-decoration:none;font-size:11px;text-align:center;transition:transform .2s cubic-bezier(.22,1,.36,1)}
+#tiles a:hover{transform:translateY(-3px)}
+#tiles span{display:block;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile{display:grid;place-items:center;width:44px;height:44px;margin:auto;border-radius:12px;background:var(--tile);font-size:18px;font-weight:600;color:var(--fg);overflow:hidden}
+.tile img{width:24px;height:24px}
 </style></head><body>
-<div class="aurora"><i></i><i></i><i></i></div>
 <main>
-<div id="clock"></div><div id="hello"></div>
-<form action="https://duckduckgo.com/" method="get">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>
-<input name="q" placeholder="Search the web" autocomplete="off" autofocus></form>
-<div id="tiles"></div><div id="hint"></div>
+<svg class="slabs" viewBox="0 0 132 84"><path d="M14 11 96 2a4 4 0 0 1 4.4 4.8l-7 30a5 5 0 0 1-4.3 3.8L9 49a4 4 0 0 1-4.4-4.9l6-29.6A4.4 4.4 0 0 1 14 11Z"/><path d="M36 42l82-9a4 4 0 0 1 4.4 4.8l-7 30a5 5 0 0 1-4.3 3.8L31 80a4 4 0 0 1-4.4-4.9l6-29.6A4.4 4.4 0 0 1 36 42Z"/></svg>
+<form id="f">
+<div class="top"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>
+<input id="q" placeholder="Search or ask anything..." autocomplete="off" autofocus></div>
+<div class="row"><button type="submit" title="Go"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
+</form>
+<div id="tiles"></div>
 </main>
 <script>
 /*DATA*/
-const P=[["#0a84ff","#5e5ce6","#64d2ff"],["#bf5af2","#ff375f","#5e5ce6"],["#30d158","#64d2ff","#0a84ff"],["#ff9f0a","#ff375f","#ffd60a"],["#ff375f","#bf5af2","#ff9f0a"],["#64d2ff","#30d158","#5e5ce6"]];
-const t=P[+new URLSearchParams(location.search).get("tint")%P.length]||P[0];
-["--a","--b","--c"].forEach((k,i)=>document.documentElement.style.setProperty(k,t[i]));
-function tick(){const d=new Date(),h=d.getHours();
-clock.textContent=d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}).replace(/\s?[AP]M/i,"");
-hello.textContent=(h<12?"Good morning":h<18?"Good afternoon":"Good evening")+" · "+d.toLocaleDateString([], {weekday:"long",month:"long",day:"numeric"});}
-tick();setInterval(tick,1000);
+f.onsubmit=(e)=>{e.preventDefault();const t=q.value.trim();if(!t)return;
+location.href=/^\S+\.\S+$/.test(t)&&!/\s/.test(t)?(/:\/\//.test(t)?t:"https://"+t):SEARCH+encodeURIComponent(t);};
 for(const url of FAVORITES){let u;try{u=new URL(url)}catch{continue}
 if(!/^https?:$/.test(u.protocol))continue;
 const host=u.hostname.replace(/^www\./,""),a=document.createElement("a"),b=document.createElement("div"),s=document.createElement("span"),i=new Image();
 a.href=url;b.className="tile";s.textContent=host;i.src=u.origin+"/favicon.ico";
 i.onerror=()=>{b.textContent=host[0].toUpperCase()};b.append(i);a.append(b,s);tiles.append(a);}
-hint.innerHTML=FAVORITES.length?"<kbd>Ctrl K</kbd> command bar":"Press <kbd>Ctrl D</kbd> on any site to pin it here";
 </script></body></html>
