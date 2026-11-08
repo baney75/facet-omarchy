@@ -1320,6 +1320,11 @@ impl Browser {
             results.append(&line);
             targets.push(target);
         };
+        // A command whose name starts with the query outranks searching for it.
+        let leads = |title: &str| query.chars().count() >= 2 && title.to_lowercase().starts_with(&query);
+        for (title, action, icon) in COMMANDS.iter().filter(|(title, _, _)| leads(title)).take(3) {
+            add(title, "Command", gtk::Image::from_icon_name(icon), Target::Action(action));
+        }
         if !query.is_empty() {
             let text = self.command.entry.text();
             let is_search = resolve_input(&text).starts_with(search_prefix());
@@ -1347,7 +1352,7 @@ impl Browser {
                 shown += 1;
             }
         }
-        for (title, action, icon) in COMMANDS.iter().filter(|(title, _, _)| title.to_lowercase().contains(&query)).take(MAX_COMMAND_RESULTS - shown) {
+        for (title, action, icon) in COMMANDS.iter().filter(|(title, _, _)| title.to_lowercase().contains(&query) && !leads(title)).take(MAX_COMMAND_RESULTS - shown) {
             add(title, "Command", gtk::Image::from_icon_name(icon), Target::Action(action));
         }
         *self.command.targets.borrow_mut() = targets;
