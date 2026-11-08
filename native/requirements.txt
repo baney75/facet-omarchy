@@ -1,3 +1,4 @@
 faster-whisper
 argostranslate
 langdetect
+av<17
