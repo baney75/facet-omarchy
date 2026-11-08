@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Facet AI</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+<header>
+  <select id="model" title="Ollama model"></select>
+  <button id="refresh" title="Reload models">Reload</button>
+  <span id="status"></span>
+</header>
+<nav id="actions">
+  <button data-act="page">Ask page</button>
+  <button data-act="selection">Ask selection</button>
+  <button data-act="summarize">Summarize</button>
+  <button data-act="alltabs">Ask all tabs</button>
+  <button data-act="compare">Compare tabs</button>
+  <button data-act="name">Name tabs</button>
+</nav>
+<main id="log"></main>
+<form id="form">
+  <textarea id="input" rows="2" placeholder="Message local Ollama"></textarea>
+  <button id="send" type="submit">Send</button>
+  <button id="stop" type="button" hidden>Stop</button>
+</form>
+<script type="module" src="panel.js"></script>
+</body>
+</html>

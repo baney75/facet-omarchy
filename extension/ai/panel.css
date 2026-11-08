@@ -1,0 +1,12 @@
+:root { color-scheme: dark light; font: 13px system-ui, sans-serif; }
+body { margin: 0; display: flex; flex-direction: column; height: 100vh; }
+header, nav, form { display: flex; gap: 4px; padding: 6px; flex-wrap: wrap; align-items: center; }
+#model { flex: 1; min-width: 0; }
+#status { font-size: 11px; opacity: .7; }
+main { flex: 1; overflow-y: auto; padding: 6px; }
+.msg { margin: 6px 0; padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.msg.user { background: rgba(120,120,255,.18); }
+.msg.assistant { background: rgba(128,128,128,.16); }
+.msg.note { font-size: 11px; opacity: .7; }
+.msg.error { background: rgba(255,80,80,.2); }
+form textarea { flex: 1; resize: vertical; }
