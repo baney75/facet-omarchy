@@ -1,0 +1,6 @@
+#!/bin/sh
+root=$(dirname "$(dirname "$(readlink -f "$0")")")
+exec chromium --user-data-dir="${XDG_DATA_HOME:-$HOME/.local/share}/facet-omarchy/profile" \
+  --class=facet-omarchy --ozone-platform=wayland \
+  --disable-features=DisableLoadExtensionCommandLineSwitch \
+  --load-extension="$root/extension,$root/vendor/ubol" "$@"

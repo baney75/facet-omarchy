@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Facet for Omarchy",
+  "version": "0.1.0",
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Facet sidebar" },
+  "side_panel": { "default_path": "sidebar.html" },
+  "permissions": ["sidePanel", "tabs", "tabGroups", "storage", "contextMenus", "webNavigation", "scripting", "history", "bookmarks", "downloads", "sessions", "alarms", "notifications", "nativeMessaging"],
+  "host_permissions": ["<all_urls>"],
+  "commands": {
+    "toggle-sidebar": { "suggested_key": { "default": "Ctrl+Shift+S" }, "description": "Toggle sidebar" }
+  }
+}
