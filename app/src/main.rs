@@ -28,6 +28,16 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("Copy Markdown Link", "page-copyMarkdownLink", "insert-link-symbolic"),
     ("Picture in Picture", "page-videoPip", "video-display-symbolic"),
 ];
+const CONTEXT_ACTIONS: &[(&str, &str)] = &[
+    ("Reader Mode", "reader"),
+    ("Highlight Selection", "highlight"),
+    ("Remove Highlight", "removeHighlight"),
+    ("Copy Clean Link", "copyCleanLink"),
+    ("Copy Markdown Link", "copyMarkdownLink"),
+    ("Copy Page as Markdown", "copyPageMarkdown"),
+    ("Dark Mode for This Site", "toggleDark"),
+    ("Calm Mode for This Site", "toggleCalm"),
+];
 const PAGE_WORLD: &str = "facet";
 const PAGE_START: &[&str] = &[include_str!("page-shim.js"), include_str!("../../extension/page/core.js"), include_str!("../../extension/page/dark.js")];
 const PAGE_IDLE: &[&str] = &[
@@ -447,6 +457,13 @@ impl Browser {
             }
         });
         let this = Rc::downgrade(self);
+        view.connect_context_menu(move |v, menu, hit| {
+            if let Some(this) = this.upgrade() {
+                this.extend_context_menu(v, menu, hit);
+            }
+            false
+        });
+        let this = Rc::downgrade(self);
         view.connect_permission_request(move |v, request| {
             let Some(this) = this.upgrade() else { return false };
             this.ask_permission(v, request);
@@ -462,6 +479,30 @@ impl Browser {
 
         if show {
             list.select_row(Some(&row));
+        }
+    }
+
+    /// Appends Facet's page tools to WebKit's own menu; link handlers get the link under the pointer.
+    fn extend_context_menu(self: &Rc<Self>, view: &webkit6::WebView, menu: &webkit6::ContextMenu, hit: &webkit6::HitTestResult) {
+        if view.uri().map_or(true, |u| is_internal(&u)) {
+            return;
+        }
+        let link = hit.link_uri().map(|l| l.to_string());
+        let mut entries: Vec<(&str, &str)> = CONTEXT_ACTIONS.iter().copied().filter(|(_, handler)| *handler != "highlight" || hit.context_is_selection()).collect();
+        if hit.context_is_media() {
+            entries.push(("Picture in Picture", "videoPip"));
+        }
+        menu.append(&webkit6::ContextMenuItem::new_separator());
+        for (label, handler) in entries {
+            let action = gio::SimpleAction::new(handler, None);
+            let this = Rc::downgrade(self);
+            let link = link.clone();
+            action.connect_activate(move |_, _| {
+                if let Some(this) = this.upgrade() {
+                    this.run_page_action(handler, link.as_ref().map(|l| serde_json::json!({ "linkUrl": l })));
+                }
+            });
+            menu.append(&webkit6::ContextMenuItem::from_gaction(&action, label, None));
         }
     }
 
@@ -620,13 +661,17 @@ impl Browser {
         }
     }
 
-    fn run_page_action(&self, handler: &str) {
+    /// Runs a page handler in the isolated world; `arg` reaches it as the message object.
+    fn run_page_action(&self, handler: &str, arg: Option<serde_json::Value>) {
         let Some(view) = self.current_view() else { return };
         if is_internal(&self.current_url()) {
             self.toast("Open a site to use this");
             return;
         }
-        let script = format!("__facetPage.ready.then(() => __facetPage.handlers[{handler:?}]({{}}));void 0");
+        // Both parts are JSON, so neither can close the string or call anything else.
+        let name = serde_json::to_string(handler).unwrap_or_default();
+        let arg = serde_json::to_string(&arg.unwrap_or_else(|| serde_json::json!({}))).unwrap_or_else(|_| "{}".into()).replace('\u{2028}', "\\u2028").replace('\u{2029}', "\\u2029");
+        let script = format!("__facetPage.ready.then(() => __facetPage.handlers[{name}]({arg}));void 0");
         view.evaluate_javascript(&script, Some(PAGE_WORLD), None, gio::Cancellable::NONE, |_| {});
     }
 
@@ -787,6 +832,8 @@ impl Browser {
                 println!("page handlers: {}", r.map(|v| v.to_str().to_string()).unwrap_or_else(|e| e.to_string()));
             });
         }
+        // A hostile link must reach the handler as data and leave the script intact.
+        self.run_page_action("copyCleanLink", Some(serde_json::json!({ "linkUrl": "https://example.com/?a=\"');throw 1;//" })));
         self.open_tab("about:blank");
         self.cycle_tab(1);
         self.cycle_tab(-1);
@@ -1265,7 +1312,7 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     });
     for (_, action, _) in COMMANDS.iter().filter(|(_, a, _)| a.starts_with("page-")) {
         let b = browser.clone();
-        add_action(app, action, &[], move || b.run_page_action(&action["page-".len()..]));
+        add_action(app, action, &[], move || b.run_page_action(&action["page-".len()..], None));
     }
 
     window.present();
