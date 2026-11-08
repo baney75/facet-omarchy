@@ -59,3 +59,13 @@ progressbar.facet-progress progress { min-height: 2px; background: @accent_bg_co
 .facet-command .kind { font-size: 11.5px; opacity: .62; }
 
 .facet-find { margin: 14px; padding: 5px; border-radius: 12px; background: @popover_bg_color; box-shadow: 0 8px 28px rgba(0, 0, 0, .45), inset 0 0 0 .5px rgba(255, 255, 255, .14); }
+
+.right .facet-page { margin: 5px 0 5px 5px; }
+.collapsed.right .facet-page { margin-right: 5px; }
+button.off { opacity: .4; }
+.facet-tidy { min-height: 20px; padding: 0 6px; font-size: 11.5px; font-weight: 400; color: rgba(255, 255, 255, .62); }
+.facet-tidy:hover { color: #ffffff; }
+.facet-theme { border-radius: 10px; }
+.facet-ai { margin: 5px 5px 5px 0; padding: 12px; border-radius: 10px; color: #f5f5f7; background: rgba(28, 26, 31, .82); box-shadow: 0 0 0 .5px rgba(255, 255, 255, .14); }
+.facet-welcome { padding: 34px 40px 28px; border-radius: 22px; color: #f5f5f7; background: rgba(28, 26, 31, .9); box-shadow: 0 30px 90px rgba(0, 0, 0, .55), inset 0 0 0 .5px rgba(255, 255, 255, .16); }
+.facet-welcome-title { font-size: 28px; font-weight: 600; }
