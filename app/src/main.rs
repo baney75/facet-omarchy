@@ -32,6 +32,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("Close Tab", "close-tab", "window-close-symbolic"),
     ("Ask AI About This Page", "ask-ai", "dialog-question-symbolic"),
     ("Tidy Tabs", "tidy", "view-sort-ascending-symbolic"),
+    ("Next Theme", "next-theme", "applications-graphics-symbolic"),
     ("Themes and Settings", "settings", "emblem-system-symbolic"),
     ("Block Ads On or Off", "toggle-ads", "security-high-symbolic"),
     ("Reader Mode", "page-reader", "view-paged-symbolic"),
@@ -2285,6 +2286,11 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     add_action(app, "ask-ai", &["<Ctrl>j"], move || b.toggle_ai());
     let b = browser.clone();
     add_action(app, "tidy", &[], move || b.tidy_tabs());
+    let b = browser.clone();
+    add_action(app, "next-theme", &["<Ctrl><Shift>t"], move || {
+        let theme = b.spaces.borrow()[b.active.get()].theme;
+        b.set_space_theme(theme + 1);
+    });
     let b = browser.clone();
     add_action(app, "settings", &["<Ctrl>comma"], move || b.open_settings());
     let b = browser.clone();

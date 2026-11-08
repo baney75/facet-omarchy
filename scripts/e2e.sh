@@ -13,14 +13,16 @@ session() { cat "$out/data/facet/session.json" 2>/dev/null; }
 head -c 300000 /dev/urandom > "$out/web/sample.zip"
 printf '<!doctype html><title>Glass test page</title><h1>Glass</h1><p>Facet renders this page about windows made of glass.</p><a href="/sample.zip" id=d>download</a>' > "$out/web/index.html"
 python3 -I -m http.server 8931 --bind 127.0.0.1 --directory "$out/web" >/dev/null 2>&1 & web=$!
+for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${display#:}" ] || break; sleep .2; done
 Xvfb "$display" -screen 0 1600x1000x24 >/dev/null 2>&1 & xv=$!
 trap 'kill $app $web $xv 2>/dev/null' EXIT
 sleep 1; export DISPLAY=$display
 echo "XDG_DOWNLOAD_DIR=\"$out/downloads\"" > "$out/config/user-dirs.dirs"
 env -u WAYLAND_DISPLAY GDK_BACKEND=x11 GDK_SCALE=1 XDG_CONFIG_HOME="$out/config" XDG_DATA_HOME="$out/data" XDG_CACHE_HOME="$out/cache" \
   FACET_RULES="$root/app/target/content-rules.json" "$root/app/target/release/facet" >"$out/app.log" 2>&1 & app=$!
-sleep 9
-win=$(xdotool search --onlyvisible --name Facet | tail -1)
+win=""
+for _ in $(seq 1 100); do win=$(xdotool search --onlyvisible --name Facet 2>/dev/null | tail -1); [ -n "$win" ] && break; sleep .2; done
+sleep 8
 xdotool windowsize "$win" 1600 1000 windowmove "$win" 0 0 windowfocus "$win"; sleep 1.5
 shot onboarding
 key Return; sleep 1.5
