@@ -4,6 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cargo build --release --manifest-path "$root/app/Cargo.toml"
 install -Dm755 "$root/app/target/release/facet" "$HOME/.local/bin/facet"
+python3 -I "$root/scripts/build-content-rules.py"
+install -Dm644 "$root/app/target/content-rules.json" "$HOME/.local/share/facet/content-rules.json"
 install -Dm644 "$root/assets/facet.png" "$HOME/.local/share/icons/hicolor/256x256/apps/app.panes.browser.png"
 rm -f "$HOME/.local/share/applications/facet-omarchy.desktop"
 cat > "$HOME/.local/share/applications/app.panes.browser.desktop" <<EOF

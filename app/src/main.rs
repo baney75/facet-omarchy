@@ -18,6 +18,27 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("Toggle Sidebar", "toggle-sidebar", "sidebar-show-symbolic"),
     ("Reload Page", "reload", "view-refresh-symbolic"),
     ("Close Tab", "close-tab", "window-close-symbolic"),
+    ("Reader Mode", "page-reader", "view-paged-symbolic"),
+    ("Dark Mode for This Site", "page-toggleDark", "weather-clear-night-symbolic"),
+    ("Calm Mode for This Site", "page-toggleCalm", "face-calm-symbolic"),
+    ("Highlight Selection", "page-highlight", "edit-select-all-symbolic"),
+    ("Remove Highlight", "page-removeHighlight", "edit-clear-symbolic"),
+    ("Copy Page as Markdown", "page-copyPageMarkdown", "edit-copy-symbolic"),
+    ("Copy Clean Link", "page-copyCleanLink", "insert-link-symbolic"),
+    ("Copy Markdown Link", "page-copyMarkdownLink", "insert-link-symbolic"),
+    ("Picture in Picture", "page-videoPip", "video-display-symbolic"),
+];
+const PAGE_WORLD: &str = "facet";
+const PAGE_START: &[&str] = &[include_str!("page-shim.js"), include_str!("../../extension/page/core.js"), include_str!("../../extension/page/dark.js")];
+const PAGE_IDLE: &[&str] = &[
+    include_str!("../../extension/page/extract.js"),
+    include_str!("../../extension/page/links.js"),
+    include_str!("../../extension/page/reader.js"),
+    include_str!("../../extension/page/highlights.js"),
+    include_str!("../../extension/page/calm.js"),
+    include_str!("../../extension/page/video.js"),
+    include_str!("../../extension/page/sponsor.js"),
+    include_str!("../../extension/page/peek.js"),
 ];
 
 #[derive(Clone, Copy)]
@@ -54,7 +75,7 @@ impl Tab {
     }
 
     fn title(&self) -> String {
-        self.view.title().map(|t| t.to_string()).filter(|t| !t.is_empty()).or_else(|| self.url()).unwrap_or_default()
+        self.view.title().map(|t| t.to_string()).filter(|t| !t.is_empty()).or_else(|| self.url().filter(|u| !is_internal(u))).unwrap_or_else(|| "New Tab".into())
     }
 }
 
@@ -94,6 +115,8 @@ struct Browser {
     command: Command,
     find: Find,
     network: webkit6::NetworkSession,
+    content: webkit6::UserContentManager,
+    page_store: RefCell<serde_json::Map<String, serde_json::Value>>,
     spaces: RefCell<Vec<Space>>,
     favorites: RefCell<Vec<String>>,
     active: Cell<usize>,
@@ -108,6 +131,10 @@ fn data_dir() -> PathBuf {
 
 fn session_path() -> PathBuf {
     data_dir().join("session.json")
+}
+
+fn page_store_path() -> PathBuf {
+    data_dir().join("page-store.json")
 }
 
 fn host_of(url: &str) -> Option<String> {
@@ -316,13 +343,13 @@ impl Browser {
     }
 
     fn open_tab(self: &Rc<Self>, url: &str) {
-        let view = webkit6::WebView::builder().network_session(&self.network).build();
+        let view = webkit6::WebView::builder().network_session(&self.network).user_content_manager(&self.content).build();
         self.attach_view(view.clone(), None, true);
         view.load_uri(url);
     }
 
     fn add_restored_tab(self: &Rc<Self>, url: &str) {
-        let view = webkit6::WebView::builder().network_session(&self.network).build();
+        let view = webkit6::WebView::builder().network_session(&self.network).user_content_manager(&self.content).build();
         self.attach_view(view, Some(url.to_string()), false);
     }
 
@@ -407,7 +434,7 @@ impl Browser {
         let this = Rc::downgrade(self);
         view.connect_create(move |opener, _| {
             let this = this.upgrade()?;
-            let popup = webkit6::WebView::builder().related_view(opener).build();
+            let popup = webkit6::WebView::builder().related_view(opener).user_content_manager(&this.content).build();
             this.attach_view(popup.clone(), None, true);
             Some(popup.upcast())
         });
@@ -593,6 +620,84 @@ impl Browser {
         }
     }
 
+    fn run_page_action(&self, handler: &str) {
+        let Some(view) = self.current_view() else { return };
+        if is_internal(&self.current_url()) {
+            self.toast("Open a site to use this");
+            return;
+        }
+        let script = format!("__facetPage.ready.then(() => __facetPage.handlers[{handler:?}]({{}}));void 0");
+        view.evaluate_javascript(&script, Some(PAGE_WORLD), None, gio::Cancellable::NONE, |_| {});
+    }
+
+    /// Answers storage requests from the page scripts' isolated world.
+    fn handle_page_message(&self, message: &str) -> serde_json::Value {
+        let Ok(message) = serde_json::from_str::<serde_json::Value>(message) else { return serde_json::json!({}) };
+        let mut store = self.page_store.borrow_mut();
+        match message["op"].as_str() {
+            Some("get") => {
+                let keys: Vec<&str> = match &message["keys"] {
+                    serde_json::Value::String(key) => vec![key.as_str()],
+                    serde_json::Value::Array(keys) => keys.iter().filter_map(|k| k.as_str()).collect(),
+                    _ => Vec::new(),
+                };
+                keys.into_iter().filter_map(|k| store.get(k).map(|v| (k.to_string(), v.clone()))).collect::<serde_json::Map<_, _>>().into()
+            }
+            Some("set") => {
+                if let Some(items) = message["items"].as_object() {
+                    store.extend(items.clone());
+                    let _ = std::fs::create_dir_all(data_dir());
+                    if let Ok(json) = serde_json::to_vec(&*store) {
+                        let _ = std::fs::write(page_store_path(), json);
+                    }
+                }
+                serde_json::json!({})
+            }
+            _ => serde_json::json!({}),
+        }
+    }
+
+    /// Loads the compiled ad-block rules, compiling them first on a new install.
+    /// Cached rules apply before any tab loads; a first compile runs behind the restored tabs.
+    fn start_blocker(self: &Rc<Self>, url: Option<String>) {
+        let rules = std::env::var_os("FACET_RULES").map(PathBuf::from).unwrap_or_else(|| data_dir().join("content-rules.json"));
+        let Some(size) = std::fs::metadata(&rules).ok().map(|m| m.len()) else {
+            self.restore(url);
+            return;
+        };
+        let store = webkit6::UserContentFilterStore::new(&glib::user_cache_dir().join("facet/filters").to_string_lossy());
+        let id = format!("rules-{size}");
+        let this = self.clone();
+        let compiler = store.clone();
+        store.load(&id.clone(), gio::Cancellable::NONE, move |result| {
+            if let Ok(filter) = result {
+                this.content.add_filter(&filter);
+                this.restore(url);
+                return;
+            }
+            let wait = this.smoke.get();
+            if !wait {
+                this.restore(url.clone());
+            }
+            let Ok(bytes) = std::fs::read(&rules) else {
+                if wait { this.restore(url); }
+                return;
+            };
+            let this = this.clone();
+            let started = Instant::now();
+            compiler.save(&id, &glib::Bytes::from_owned(bytes), gio::Cancellable::NONE, move |result| {
+                match result {
+                    Ok(filter) => {
+                        println!("ad-block rules compiled in {} ms", started.elapsed().as_millis());
+                        this.content.add_filter(&filter);
+                    }
+                    Err(error) => eprintln!("ad-block rules failed to compile: {error}"),
+                }
+                if wait { this.restore(url); }
+            });
+        });
+    }
+
     fn open_find(&self) {
         self.find.root.set_visible(true);
         self.find.entry.grab_focus();
@@ -673,6 +778,15 @@ impl Browser {
 
     /// Drives the operations that cross GTK's synchronous signals, then quits.
     fn run_smoke_script(self: &Rc<Self>) {
+        if let Some(view) = self.current_view() {
+            let probe = "try { await fetch('https://www.googletagservices.com/tag/js/gpt.js', { mode: 'no-cors' }); return 'loaded' } catch (e) { return 'blocked' }";
+            view.call_async_javascript_function(probe, None, None, None, gio::Cancellable::NONE, |r| {
+                println!("ad probe: {}", r.map(|v| v.to_str().to_string()).unwrap_or_else(|e| e.to_string()));
+            });
+            view.evaluate_javascript("Object.keys(__facetPage.handlers).length", Some(PAGE_WORLD), None, gio::Cancellable::NONE, |r| {
+                println!("page handlers: {}", r.map(|v| v.to_str().to_string()).unwrap_or_else(|e| e.to_string()));
+            });
+        }
         self.open_tab("about:blank");
         self.cycle_tab(1);
         self.cycle_tab(-1);
@@ -796,6 +910,16 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
         manager.favicon_database()
     });
 
+    let content = webkit6::UserContentManager::new();
+    content.register_script_message_handler_with_reply("facet", Some(PAGE_WORLD));
+    let allow = ["http://*/*", "https://*/*"];
+    let add_scripts = |sources: &[&str], time| {
+        let script = webkit6::UserScript::for_world(&sources.join("\n"), webkit6::UserContentInjectedFrames::TopFrame, time, PAGE_WORLD, &allow, &[]);
+        content.add_script(&script);
+    };
+    add_scripts(PAGE_START, webkit6::UserScriptInjectionTime::Start);
+    add_scripts(PAGE_IDLE, webkit6::UserScriptInjectionTime::End);
+
     let pages = gtk::Stack::new();
     pages.set_hexpand(true);
     pages.set_vexpand(true);
@@ -891,6 +1015,8 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
         command: Command { root: command_scrim.clone(), entry: command_entry.clone(), results: command_results.clone(), opens_new_tab: Cell::new(false), targets: RefCell::new(Vec::new()) },
         find: Find { root: find_root.clone(), entry: find_entry.clone() },
         network: network.clone(),
+        content: content.clone(),
+        page_store: RefCell::new(std::fs::read(page_store_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()),
         spaces: RefCell::new(Vec::new()),
         favorites: RefCell::new(Vec::new()),
         active: Cell::new(0),
@@ -1128,8 +1254,22 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
     let b = browser.clone();
     window.connect_close_request(move |_| { b.save(); glib::Propagation::Proceed });
 
-    browser.restore(url);
+    let weak = Rc::downgrade(&browser);
+    content.connect_script_message_with_reply_received(Some("facet"), move |_, value, reply| {
+        let Some(this) = weak.upgrade() else { return false };
+        let answer = this.handle_page_message(&value.to_str()).to_string();
+        if let Some(context) = value.context() {
+            reply.return_value(&webkit6::javascriptcore::Value::new_string(&context, Some(&answer)));
+        }
+        true
+    });
+    for (_, action, _) in COMMANDS.iter().filter(|(_, a, _)| a.starts_with("page-")) {
+        let b = browser.clone();
+        add_action(app, action, &[], move || b.run_page_action(&action["page-".len()..]));
+    }
+
     window.present();
+    browser.start_blocker(url);
 }
 
 fn main() -> glib::ExitCode {
