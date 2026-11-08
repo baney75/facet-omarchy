@@ -1,11 +1,7 @@
-:root { color-scheme: dark light; font: 13px system-ui, sans-serif; }
-body { margin: 0; padding: 10px; background: Canvas; color: CanvasText; }
-h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .65; margin: 16px 0 6px; }
-input, button, select { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid #8884; background: #8881; color: inherit; }
-input { width: calc(100% - 18px); box-sizing: content-box; }
-button { cursor: pointer; }
-.row { padding: 6px 0; border-bottom: 1px solid #8882; display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
-.row small { opacity: .65; display: block; overflow-wrap: anywhere; }
-.big { font-size: 20px; font-weight: 600; }
-a { color: LinkText; }
-nav { display: flex; gap: 10px; margin-bottom: 8px; }
+@import "../ui/base.css";
+body { padding: 10px; display: flex; flex-direction: column; min-height: 100vh; }
+.row { padding: 7px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+.row small { color: var(--dim); display: block; overflow-wrap: anywhere; }
+.big { font-size: 22px; font-weight: 600; }
+body > nav:not(.facet-rail) { display: none; }
+.facet-rail { margin: auto -10px -10px; }

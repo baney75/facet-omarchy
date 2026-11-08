@@ -3,10 +3,14 @@ root=$(dirname "$(dirname "$(readlink -f "$0")")")
 data="${XDG_DATA_HOME:-$HOME/.local/share}/facet-omarchy"
 extensions="$root/extension,$root/vendor/ubol"
 
+# Omarchy tints every Chromium through a machine policy; hide it from this process so Facet keeps its own look.
+chromium=chromium
+command -v bwrap >/dev/null && chromium="bwrap --dev-bind / / --tmpfs /etc/chromium chromium"
+
 launch() {
   profile=$1
   shift
-  exec chromium --user-data-dir="$profile" --class=facet-omarchy --ozone-platform-hint=auto \
+  exec $chromium --user-data-dir="$profile" --class=facet-omarchy --ozone-platform-hint=auto \
     --password-store=gnome-libsecret --load-extension="$extensions" "$@"
 }
 
@@ -31,6 +35,6 @@ until grep -q 'Bootstrapped 100%' "$log" 2>/dev/null; do
 done
 [ -n "${FACET_TOR_CHECK:-}" ] && { curl -fsS -m 60 --socks5-hostname "127.0.0.1:$port" https://check.torproject.org/api/ip; echo; exit; }
 # Separate throwaway profile, with DNS sent through Tor.
-chromium --user-data-dir="$run/profile" --class=facet-omarchy-tor --ozone-platform-hint=auto --incognito --no-first-run \
+$chromium --user-data-dir="$run/profile" --class=facet-omarchy-tor --ozone-platform-hint=auto --incognito --no-first-run \
   --proxy-server="socks5://127.0.0.1:$port" --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1" \
   --load-extension="$extensions" "$@"

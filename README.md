@@ -1,6 +1,6 @@
 # Facet for Omarchy
 
-A private, keyboard-first Chromium browser setup for [Omarchy](https://omarchy.org/) Linux. It is an independent reimplementation of the feature set of the macOS browser Facet and is not affiliated with or endorsed by its makers. It contains none of Facet's code or artwork.
+Facet for Omarchy Linux. This is a native rebuild of the macOS browser's feature set on Chromium, made from the macOS release because the Swift app depends on Apple-only frameworks.
 
 ## Features
 

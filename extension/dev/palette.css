@@ -1,5 +1,4 @@
-:root { color-scheme: dark light; font: 14px system-ui, sans-serif; }
-body { margin: 0; }
+@import "../ui/base.css";
 #q { width: 100%; box-sizing: border-box; padding: 12px 14px; font: inherit; border: 0; border-bottom: 1px solid #8884; outline: none; background: transparent; color: inherit; }
 #list { list-style: none; margin: 0; padding: 4px; }
 #list li { padding: 8px 10px; border-radius: 6px; cursor: pointer; }

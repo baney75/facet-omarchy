@@ -1,0 +1,5 @@
+@import "../ui/base.css";
+body { display: flex; flex-direction: column; gap: 12px; min-height: 100vh; }
+#talk { margin: 16px 12px 0; padding: 36px 12px; }
+#talk.on { background: var(--accent); color: var(--accent-fg); }
+output { flex: 1; padding: 0 12px; color: var(--dim); }
