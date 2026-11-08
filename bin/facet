@@ -11,7 +11,7 @@ launch() {
   profile=$1
   shift
   exec $chromium --user-data-dir="$profile" --class=facet-omarchy --ozone-platform-hint=auto \
-    --password-store=gnome-libsecret --load-extension="$extensions" "$@"
+    --password-store=gnome-libsecret --no-default-browser-check --no-first-run --load-extension="$extensions" "$@"
 }
 
 if [ "${1:-}" != "--tor" ]; then
