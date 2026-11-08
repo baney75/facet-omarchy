@@ -80,7 +80,7 @@ function showBubble(text) {
 async function ensureOffscreen() {
   if (await chrome.offscreen.hasDocument()) return;
   await chrome.offscreen.createDocument({
-    url: "native/offscreen.html",
+    url: "dev/offscreen.html",
     reasons: ["USER_MEDIA"],
     justification: "Record tab audio for local live captions",
   });

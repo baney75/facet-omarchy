@@ -70,6 +70,9 @@
     },
     "toggle-pin": {
       "description": "Pin or unpin tab"
+    },
+    "dev-palette": {
+      "description": "Developer palette"
     }
   },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzV7K0/nPg3RxDHHod4uHEpPTdF23fTZk3GsoPjACEJLHSOz9ov1q0W0yYFePerjHk6uK4kofzmASm8utYxtzOvB0SLBhT5rNL+oDMr4mVLC+ylx2/sZbRtLJesYeEeINoPXsGveQEyhNBWIxrSFYcMnNkwvvwJMhwbzU5ddpcJ6CDfCPDW1E/FkpYdYI8TQ7PjwCQAo4f9k9QUo4cqxS4xFffywwxXble4YSFlQuPhDenMHslUJpEfSqKws+nFp7y7lKK92m449KBRuH4do/qJOzas4ZM0q8qFraJK2ns44iKlWGSzktbcg8W6UE0sw0RfAU84Ii9WLr2dgwsf/BBwIDAQAB",

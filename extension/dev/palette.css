@@ -1,0 +1,8 @@
+:root { color-scheme: dark light; font: 14px system-ui, sans-serif; }
+body { margin: 0; }
+#q { width: 100%; box-sizing: border-box; padding: 12px 14px; font: inherit; border: 0; border-bottom: 1px solid #8884; outline: none; background: transparent; color: inherit; }
+#list { list-style: none; margin: 0; padding: 4px; }
+#list li { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+#list li.sel { background: #5b8def44; }
+#list li.off { opacity: .45; }
+#status { padding: 8px 14px; font-size: 12px; opacity: .8; white-space: pre-wrap; }

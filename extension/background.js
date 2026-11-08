@@ -1,3 +1,4 @@
+import { register as registerDev } from "./dev/index.js";
 import { register as registerShell } from "./shell/index.js";
 import { register as registerPage } from "./page/index.js";
 import { register as registerAi } from "./ai/index.js";
@@ -22,3 +23,4 @@ registerShell();
 registerPage();
 registerAi();
 registerNative();
+registerDev();
