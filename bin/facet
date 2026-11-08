@@ -1,6 +1,36 @@
 #!/bin/sh
 root=$(dirname "$(dirname "$(readlink -f "$0")")")
-exec chromium --user-data-dir="${XDG_DATA_HOME:-$HOME/.local/share}/facet-omarchy/profile" \
-  --class=facet-omarchy --ozone-platform=wayland \
-  --disable-features=DisableLoadExtensionCommandLineSwitch \
-  --load-extension="$root/extension,$root/vendor/ubol" "$@"
+data="${XDG_DATA_HOME:-$HOME/.local/share}/facet-omarchy"
+extensions="$root/extension,$root/vendor/ubol"
+
+launch() {
+  profile=$1
+  shift
+  exec chromium --user-data-dir="$profile" --class=facet-omarchy --ozone-platform-hint=auto \
+    --password-store=gnome-libsecret --load-extension="$extensions" "$@"
+}
+
+if [ "${1:-}" != "--tor" ]; then
+  launch "$data/profile" "$@"
+fi
+shift
+
+tor_dir="$data/tor/tor"
+[ -x "$tor_dir/tor" ] || { echo "Tor is not installed. Run scripts/install-tor.sh" >&2; exit 1; }
+run=$(mktemp -d)
+log="$run/tor.log"
+port=${FACET_TOR_PORT:-19050}
+LD_LIBRARY_PATH="$tor_dir" "$tor_dir/tor" --DataDirectory "$data/tor/state" --SocksPort "127.0.0.1:$port" --Log "notice file $log" &
+tor_pid=$!
+trap 'kill "$tor_pid" 2>/dev/null; rm -rf "$run"' EXIT
+tries=0
+until grep -q 'Bootstrapped 100%' "$log" 2>/dev/null; do
+  tries=$((tries + 1))
+  [ "$tries" -le 120 ] && kill -0 "$tor_pid" 2>/dev/null || { echo "Tor did not connect" >&2; exit 1; }
+  sleep 1
+done
+[ -n "${FACET_TOR_CHECK:-}" ] && { curl -fsS -m 60 --socks5-hostname "127.0.0.1:$port" https://check.torproject.org/api/ip; echo; exit; }
+# Separate throwaway profile, with DNS sent through Tor.
+chromium --user-data-dir="$run/profile" --class=facet-omarchy-tor --ozone-platform-hint=auto --incognito --no-first-run \
+  --proxy-server="socks5://127.0.0.1:$port" --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1" \
+  --load-extension="$extensions" "$@"
