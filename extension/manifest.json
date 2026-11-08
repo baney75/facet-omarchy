@@ -10,7 +10,7 @@
     "default_title": "Facet sidebar"
   },
   "side_panel": {
-    "default_path": "sidebar.html"
+    "default_path": "shell/tabs.html"
   },
   "permissions": [
     "sidePanel",
@@ -29,7 +29,9 @@
     "nativeMessaging",
     "tts",
     "tabCapture",
-    "offscreen"
+    "offscreen",
+    "search",
+    "topSites"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -40,6 +42,33 @@
         "default": "Ctrl+Shift+S"
       },
       "description": "Toggle sidebar"
+    },
+    "open-palette": {
+      "suggested_key": {
+        "default": "Ctrl+K"
+      },
+      "description": "Open command palette"
+    },
+    "next-space": {
+      "suggested_key": {
+        "default": "Alt+PageDown"
+      },
+      "description": "Next Space"
+    },
+    "prev-space": {
+      "suggested_key": {
+        "default": "Alt+PageUp"
+      },
+      "description": "Previous Space"
+    },
+    "tidy-tabs": {
+      "description": "Tidy tabs by domain"
+    },
+    "new-space": {
+      "description": "New Space"
+    },
+    "toggle-pin": {
+      "description": "Pin or unpin tab"
     }
   },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzV7K0/nPg3RxDHHod4uHEpPTdF23fTZk3GsoPjACEJLHSOz9ov1q0W0yYFePerjHk6uK4kofzmASm8utYxtzOvB0SLBhT5rNL+oDMr4mVLC+ylx2/sZbRtLJesYeEeINoPXsGveQEyhNBWIxrSFYcMnNkwvvwJMhwbzU5ddpcJ6CDfCPDW1E/FkpYdYI8TQ7PjwCQAo4f9k9QUo4cqxS4xFffywwxXble4YSFlQuPhDenMHslUJpEfSqKws+nFp7y7lKK92m449KBRuH4do/qJOzas4ZM0q8qFraJK2ns44iKlWGSzktbcg8W6UE0sw0RfAU84Ii9WLr2dgwsf/BBwIDAQAB",
@@ -70,5 +99,8 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "chrome_url_overrides": {
+    "newtab": "shell/newtab.html"
+  }
 }

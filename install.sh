@@ -4,6 +4,8 @@ set -eu
 root=$(dirname "$(readlink -f "$0")")
 data="${XDG_DATA_HOME:-$HOME/.local/share}/facet-omarchy"
 uv venv --quiet --allow-existing --python 3.12 "$data/venv"
+# CPU torch first, or Argos pulls in several GB of CUDA libraries the host never uses.
+uv pip install --quiet --python "$data/venv/bin/python" --index-url https://download.pytorch.org/whl/cpu torch
 uv pip install --quiet --python "$data/venv/bin/python" -r "$root/native/requirements.txt"
 cat > "$data/facet-host" <<EOF
 #!/bin/sh
