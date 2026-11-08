@@ -2,10 +2,11 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Instant;
-use webkit6::prelude::*;
+use std::time::{Duration, Instant};
+use webkit6::{prelude::*, soup};
 use {libadwaita as adw, gtk4 as gtk};
 
 const APP_ID: &str = "app.panes.browser";
@@ -38,6 +39,9 @@ const CONTEXT_ACTIONS: &[(&str, &str)] = &[
     ("Dark Mode for This Site", "toggleDark"),
     ("Calm Mode for This Site", "toggleCalm"),
 ];
+const PEEK_TIMEOUT: Duration = Duration::from_secs(6);
+const PEEK_MAX_BYTES: usize = 200_000;
+const PEEK_MAX_HOPS: usize = 5;
 const PAGE_WORLD: &str = "facet";
 const PAGE_START: &[&str] = &[include_str!("page-shim.js"), include_str!("../../extension/page/core.js"), include_str!("../../extension/page/dark.js")];
 const PAGE_IDLE: &[&str] = &[
@@ -189,6 +193,187 @@ fn unique_download_path(suggested: &str) -> PathBuf {
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     (1..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).expect("unbounded range")
+}
+
+/// True for addresses a link preview may contact: nothing loopback, private, link-local, multicast or unspecified.
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_multicast() || v4.is_unspecified() || v4.is_broadcast() || (a == 100 && (64..128).contains(&b)) || a == 0 || a >= 240)
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => is_public_ip(IpAddr::V4(v4)),
+            None => {
+                let first = v6.segments()[0];
+                !(v6.is_loopback() || v6.is_multicast() || v6.is_unspecified() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80)
+            }
+        },
+    }
+}
+
+/// Accepts only http and https URLs whose host resolves solely to public addresses.
+async fn check_peek_target(uri: &glib::Uri) -> Result<(), String> {
+    if !matches!(uri.scheme().as_str(), "http" | "https") {
+        return Err("only http and https links can be previewed".into());
+    }
+    let host = uri.host().filter(|h| !h.is_empty()).ok_or("link has no host")?;
+    let addresses = gio::Resolver::default().lookup_by_name_future(&host).await.map_err(|e| e.message().to_string())?;
+    if addresses.is_empty() {
+        return Err("host did not resolve".into());
+    }
+    // An address that does not parse counts as unsafe, such as an IPv6 zone.
+    for address in addresses {
+        match address.to_str().parse::<IpAddr>() {
+            Ok(ip) if is_public_ip(ip) => {}
+            _ => return Err("link points at a private address".into()),
+        }
+    }
+    Ok(())
+}
+
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let decoded = rest.find(';').filter(|end| *end <= 10).and_then(|end| {
+            let name = &rest[1..end];
+            let ch = match name.to_ascii_lowercase().as_str() {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                other => other.strip_prefix("#x").and_then(|h| u32::from_str_radix(h, 16).ok()).or_else(|| other.strip_prefix('#').and_then(|d| d.parse().ok())).and_then(char::from_u32),
+            }?;
+            Some((ch, end + 1))
+        });
+        match decoded {
+            Some((ch, used)) => {
+                out.push(ch);
+                rest = &rest[used..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Reads the first quoted value among `names` in one tag, such as `property="og:title"`.
+fn tag_attribute(tag: &str, lower: &str, names: &[&str]) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
+    for name in names {
+        let mut from = 0;
+        while let Some(found) = lower[from..].find(name) {
+            let at = from + found;
+            from = at + name.len();
+            let before_ok = at == 0 || !lower.as_bytes()[at - 1].is_ascii_alphanumeric();
+            let after = lower[from..].trim_start();
+            let Some(value) = after.strip_prefix('=').map(str::trim_start) else { continue };
+            let Some(quote) = value.chars().next().filter(|c| *c == '"' || *c == '\'') else { continue };
+            let start = tag.len() - value.len() + 1;
+            let Some(len) = tag[start..].find(quote) else { continue };
+            if before_ok && (best.is_none() || at < best.as_ref().map_or(usize::MAX, |b| b.0)) {
+                best = Some((at, tag[start..start + len].to_string()));
+            }
+            break;
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// First non-empty `content` of a meta tag whose property or name is one of `names`.
+fn meta_of(html: &str, lower: &str, names: &[&str]) -> String {
+    let mut from = 0;
+    while let Some(found) = lower[from..].find("<meta") {
+        let start = from + found;
+        let end = lower[start..].find('>').map_or(lower.len(), |e| start + e);
+        from = end;
+        let (tag, tag_lower) = (&html[start..end], &lower[start..end]);
+        let Some(key) = tag_attribute(tag, tag_lower, &["property", "name"]) else { continue };
+        if !names.contains(&key.to_ascii_lowercase().as_str()) {
+            continue;
+        }
+        if let Some(content) = tag_attribute(tag, tag_lower, &["content"]).map(|c| decode_entities(&c).trim().to_string()).filter(|c| !c.is_empty()) {
+            return content;
+        }
+    }
+    String::new()
+}
+
+fn clip(text: String, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+/// Fetches a link's preview card. Every hop is checked before it is contacted, so a redirect cannot reach a private host.
+async fn fetch_peek(url: &str) -> Result<serde_json::Value, String> {
+    let session = soup::Session::new();
+    session.set_timeout(PEEK_TIMEOUT.as_secs() as u32);
+    session.set_user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Facet");
+    let mut uri = glib::Uri::parse(url, glib::UriFlags::NONE).map_err(|e| e.message().to_string())?;
+    for _ in 0..=PEEK_MAX_HOPS {
+        check_peek_target(&uri).await?;
+        let message = soup::Message::new("GET", uri.to_str().as_str()).map_err(|e| e.to_string())?;
+        message.set_flags(soup::MessageFlags::NO_REDIRECT);
+        if let Some(headers) = message.request_headers() {
+            headers.append("Accept", "text/html");
+        }
+        let stream = session.send_future(&message, glib::Priority::DEFAULT).await.map_err(|e| e.message().to_string())?;
+        let status = message.status();
+        if matches!(status, soup::Status::MovedPermanently | soup::Status::Found | soup::Status::SeeOther | soup::Status::TemporaryRedirect | soup::Status::PermanentRedirect) {
+            let location = message.response_headers().and_then(|h| h.one("Location")).ok_or("redirect without a location")?;
+            uri = uri.parse_relative(&location, glib::UriFlags::NONE).map_err(|e| e.message().to_string())?;
+            continue;
+        }
+        if status != soup::Status::Ok {
+            return Err(format!("HTTP status {status:?}"));
+        }
+        if !message.response_headers().and_then(|h| h.one("Content-Type")).is_some_and(|t| t.to_ascii_lowercase().contains("html")) {
+            return Err("not a web page".into());
+        }
+        let mut bytes = Vec::new();
+        while bytes.len() < PEEK_MAX_BYTES {
+            let chunk = stream.read_bytes_future(16 * 1024, glib::Priority::DEFAULT).await.map_err(|e| e.message().to_string())?;
+            if chunk.is_empty() {
+                break;
+            }
+            bytes.extend_from_slice(&chunk);
+            if String::from_utf8_lossy(&bytes).to_ascii_lowercase().contains("</head>") {
+                break;
+            }
+        }
+        let html = String::from_utf8_lossy(&bytes[..bytes.len().min(PEEK_MAX_BYTES)]).into_owned();
+        let lower = html.to_ascii_lowercase();
+        let title = Some(meta_of(&html, &lower, &["og:title", "twitter:title"])).filter(|t| !t.is_empty()).unwrap_or_else(|| {
+            let start = lower.find("<title").and_then(|s| lower[s..].find('>').map(|e| s + e + 1));
+            let end = start.and_then(|s| lower[s..].find("</title>").map(|e| s + e));
+            start.zip(end).map(|(s, e)| decode_entities(&html[s..e]).split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default()
+        });
+        let description = meta_of(&html, &lower, &["og:description", "description", "twitter:description"]);
+        let image = Some(meta_of(&html, &lower, &["og:image", "twitter:image"]))
+            .filter(|i| !i.is_empty())
+            .and_then(|i| uri.parse_relative(&i, glib::UriFlags::NONE).ok())
+            .filter(|i| matches!(i.scheme().as_str(), "http" | "https"))
+            .map(|i| i.to_str().to_string())
+            .unwrap_or_default();
+        return Ok(serde_json::json!({ "ok": true, "url": uri.to_str().as_str(), "title": clip(title, 300), "description": clip(description, 600), "image": image }));
+    }
+    Err("too many redirects".into())
+}
+
+/// Previews a link, always answering in the shape peek.js expects.
+async fn peek(url: &str) -> serde_json::Value {
+    match glib::future_with_timeout(PEEK_TIMEOUT, fetch_peek(url)).await {
+        Ok(Ok(card)) => card,
+        Ok(Err(error)) => serde_json::json!({ "ok": false, "error": error }),
+        Err(_) => serde_json::json!({ "ok": false, "error": "timed out" }),
+    }
 }
 
 impl Browser {
@@ -436,7 +621,10 @@ impl Browser {
                     println!("first page loaded in {} ms", this.started.elapsed().as_millis());
                     match std::env::var("FACET_SHOT_DIR") {
                         Ok(dir) => this.run_shot_script(PathBuf::from(dir)),
-                        Err(_) => this.run_smoke_script(),
+                        Err(_) => {
+                            let this = this.clone();
+                            glib::spawn_future_local(async move { this.run_smoke_script().await });
+                        }
                     }
                 }
             }
@@ -676,8 +864,11 @@ impl Browser {
     }
 
     /// Answers storage requests from the page scripts' isolated world.
-    fn handle_page_message(&self, message: &str) -> serde_json::Value {
+    async fn handle_page_message(&self, message: &str) -> serde_json::Value {
         let Ok(message) = serde_json::from_str::<serde_json::Value>(message) else { return serde_json::json!({}) };
+        if message["op"].as_str() == Some("peek") {
+            return peek(message["url"].as_str().unwrap_or_default()).await;
+        }
         let mut store = self.page_store.borrow_mut();
         match message["op"].as_str() {
             Some("get") => {
@@ -822,7 +1013,7 @@ impl Browser {
     }
 
     /// Drives the operations that cross GTK's synchronous signals, then quits.
-    fn run_smoke_script(self: &Rc<Self>) {
+    async fn run_smoke_script(self: &Rc<Self>) {
         if let Some(view) = self.current_view() {
             let probe = "try { await fetch('https://www.googletagservices.com/tag/js/gpt.js', { mode: 'no-cors' }); return 'loaded' } catch (e) { return 'blocked' }";
             view.call_async_javascript_function(probe, None, None, None, gio::Cancellable::NONE, |r| {
@@ -834,6 +1025,7 @@ impl Browser {
         }
         // A hostile link must reach the handler as data and leave the script intact.
         self.run_page_action("copyCleanLink", Some(serde_json::json!({ "linkUrl": "https://example.com/?a=\"');throw 1;//" })));
+        self.smoke_peek().await;
         self.open_tab("about:blank");
         self.cycle_tab(1);
         self.cycle_tab(-1);
@@ -855,6 +1047,24 @@ impl Browser {
         println!("smoke script ok: {} spaces", self.spaces.borrow().len());
         let window = self.window.clone();
         glib::timeout_add_seconds_local_once(3, move || window.close());
+    }
+
+    /// Link previews: private targets are refused, a real page is titled, and the page bridge delivers both answers.
+    async fn smoke_peek(&self) {
+        for blocked in ["http://127.0.0.1/", "http://localhost:1/", "http://169.254.169.254/", "http://10.0.0.1/", "http://[::1]/", "http://[::ffff:127.0.0.1]/", "file:///etc/hostname", "ftp://example.com/"] {
+            let card = peek(blocked).await;
+            assert_eq!(card["ok"], false, "peek must refuse {blocked}: {card}");
+        }
+        let card = peek("https://example.com/").await;
+        assert_eq!(card["ok"], true, "peek example.com failed: {card}");
+        assert_eq!(card["title"], "Example Domain", "peek title: {card}");
+        // The same request peek.js sends, through the isolated world's bridge.
+        let view = self.current_view().expect("smoke tab");
+        let script = "return JSON.stringify([await chrome.runtime.sendMessage({ type: 'facet:peek', url: 'https://example.com/' }), await chrome.runtime.sendMessage({ type: 'facet:peek', url: 'http://127.0.0.1/' })])";
+        let answer = view.call_async_javascript_function_future(script, None, Some(PAGE_WORLD), None).await.map(|v| v.to_str().to_string()).unwrap_or_else(|e| e.to_string());
+        let cards: Vec<serde_json::Value> = serde_json::from_str(&answer).unwrap_or_default();
+        assert!(cards.len() == 2 && cards[0]["ok"] == true && cards[0]["title"] == "Example Domain" && cards[1]["ok"] == false, "bridge peek answered {answer}");
+        println!("peek ok: private and non-http targets refused, bridge answered {answer}");
     }
 
     fn write_shot(&self, path: &std::path::Path) {
@@ -1303,11 +1513,13 @@ fn build(app: &adw::Application, started: Instant, smoke: bool, url: Option<Stri
 
     let weak = Rc::downgrade(&browser);
     content.connect_script_message_with_reply_received(Some("facet"), move |_, value, reply| {
-        let Some(this) = weak.upgrade() else { return false };
-        let answer = this.handle_page_message(&value.to_str()).to_string();
-        if let Some(context) = value.context() {
+        let (Some(this), Some(context)) = (weak.upgrade(), value.context()) else { return false };
+        let (message, reply) = (value.to_str().to_string(), reply.clone());
+        // Previews take network time, so the reply is sent from a future instead of this handler.
+        glib::spawn_future_local(async move {
+            let answer = this.handle_page_message(&message).await.to_string();
             reply.return_value(&webkit6::javascriptcore::Value::new_string(&context, Some(&answer)));
-        }
+        });
         true
     });
     for (_, action, _) in COMMANDS.iter().filter(|(_, a, _)| a.starts_with("page-")) {

@@ -12,6 +12,7 @@
     runtime: {
       onMessage: ignored,
       async sendMessage(message) {
+        if (message.type === "facet:peek") return call({ op: "peek", url: String(message.url || "") });
         if (message.type !== "facet:sponsor") return { ok: false };
         const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(message.videoID));
         const prefix = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 4);
