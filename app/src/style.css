@@ -69,3 +69,7 @@ button.off { opacity: .4; }
 .facet-ai { margin: 5px 5px 5px 0; padding: 12px; border-radius: 10px; color: #f5f5f7; background: rgba(28, 26, 31, .82); box-shadow: 0 0 0 .5px rgba(255, 255, 255, .14); }
 .facet-welcome { padding: 34px 40px 28px; border-radius: 22px; color: #f5f5f7; background: rgba(28, 26, 31, .9); box-shadow: 0 30px 90px rgba(0, 0, 0, .55), inset 0 0 0 .5px rgba(255, 255, 255, .16); }
 .facet-welcome-title { font-size: 28px; font-weight: 600; }
+
+.facet-ai-question { font-size: 14px; font-weight: 600; color: #ffffff; }
+.facet-ai-answer { font-size: 14px; color: rgba(245, 245, 247, .92); }
+.facet-ai-model { font-size: 11px; color: rgba(245, 245, 247, .5); }

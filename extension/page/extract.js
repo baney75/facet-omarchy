@@ -40,6 +40,11 @@
       if (el.tagName === "ARTICLE" || el.getAttribute("role") === "main") v *= 1.3;
       if (v > bs) { bs = v; best = el; }
     }
+    // Articles split into sections, as on Wikipedia: take all of them, not the longest one.
+    if (best && best.parentElement) {
+      const peers = [...best.parentElement.children].filter((c) => c !== best && c.tagName === best.tagName && c.querySelectorAll("p").length >= 2);
+      if (peers.length >= 2 && best.parentElement !== doc.body) best = best.parentElement;
+    }
     // If the best is a tiny child of an <article>, use the article.
     const art = best && best.closest("article");
     if (art && textOf(art).length < textOf(best).length * 2.2) best = art;
