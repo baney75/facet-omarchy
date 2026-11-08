@@ -1041,6 +1041,7 @@ impl Browser {
 
     /// Adds a view to the current Space; pop-ups arrive here already bound to their opener.
     fn attach_view(self: &Rc<Self>, view: webkit6::WebView, pending: Option<String>, show: bool) {
+        view.set_background_color(&gdk::RGBA::TRANSPARENT);
         view.set_hexpand(true);
         view.set_vexpand(true);
         let id = format!("tab-{}", self.next_id.replace(self.next_id.get() + 1));
@@ -1126,6 +1127,10 @@ impl Browser {
         view.connect_load_changed(move |v, event| {
             let Some(this) = this.upgrade() else { return };
             this.sync_progress();
+            if event == webkit6::LoadEvent::Committed {
+                let glass = v.uri().is_some_and(|u| u.starts_with("facet://start"));
+                v.set_background_color(if glass { &gdk::RGBA::TRANSPARENT } else { &gdk::RGBA::WHITE });
+            }
             if event == webkit6::LoadEvent::Finished {
                 this.save();
                 if let Some(url) = v.uri() {

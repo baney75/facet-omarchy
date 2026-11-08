@@ -44,7 +44,7 @@ flowbox.facet-favorites flowboxchild { padding: 0; background: none; }
 .dot-6 { background-color: #30a898; }
 .dot-7 { background-color: #f0813a; }
 
-.facet-page { margin: 5px 5px 5px 0; border-radius: 10px; background: #363638; box-shadow: 0 1px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .14); transition: margin 200ms cubic-bezier(.22, 1, .36, 1); }
+.facet-page { margin: 5px 5px 5px 0; border-radius: 10px; background: transparent; box-shadow: 0 1px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .14); transition: margin 200ms cubic-bezier(.22, 1, .36, 1); }
 .collapsed .facet-page { margin-left: 5px; }
 progressbar.facet-progress { margin: 5px 14px 0 8px; }
 progressbar.facet-progress trough { min-height: 2px; background: none; border: none; }

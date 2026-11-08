@@ -3,7 +3,7 @@
 # Usage: scripts/e2e.sh [output-dir]. Exits non-zero if any check fails.
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-out="${1:-$(mktemp -d)}"; mkdir -p "$out/shots" "$out/web" "$out/config" "$out/downloads"
+out="${1:-$(mktemp -d)}"; rm -rf "$out/data" "$out/config" "$out/cache" "$out/downloads"; mkdir -p "$out/shots" "$out/web" "$out/config" "$out/downloads"
 display=:83; fails=0
 ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fails=$((fails + 1)); }
 shot() { ffmpeg -loglevel error -y -f x11grab -video_size 1600x1000 -i "$display" -frames:v 1 "$out/shots/$1.png"; }
