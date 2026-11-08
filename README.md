@@ -1,8 +1,46 @@
 # Facet for Omarchy
 
-Facet for Omarchy Linux. This is a native rebuild of the macOS browser's feature set on Chromium, made from the macOS release because the Swift app depends on Apple-only frameworks.
+Facet for Omarchy Linux. It rebuilds the feature set of the macOS Facet browser for Linux. The native app is the primary build. A Chromium build with the same page tools remains as a fallback.
 
-## Features
+## Native app (primary)
+
+A GTK4 and libadwaita window around WebKitGTK, written in Rust (`app/`).
+
+| Area | What you get |
+| --- | --- |
+| Tabs | Vertical tab sidebar, Spaces with their own tab lists and tints, favorites, session restore |
+| Command palette | `Ctrl+K` and `Ctrl+T`: open tabs, history, commands, search or address |
+| Page tools | Reader mode, persistent highlights, copy as Markdown, clean and Markdown links, dark and calm mode per site, picture in picture, SponsorBlock |
+| Context menu | The page tools above on right click, with the link under the pointer for the link actions |
+| Link peek | Hover preview with title, description and image. The fetch runs in the app, refuses private addresses and is limited to 6 seconds and 200 KB |
+| Translate Page | Palette command that translates page text on your machine with Argos Translate |
+| History | Visits are kept in `history.json` in the app data directory (5000 newest) and searched from the palette |
+| Privacy | Ad and tracker blocking from compiled uBlock Origin Lite rulesets, tracking-parameter removal |
+
+### Install
+
+Requires Rust, GTK4, libadwaita, WebKitGTK 6 and Python 3 (for the rules build).
+
+```sh
+./scripts/install-native.sh
+facet
+```
+
+This builds the app, installs it as `~/.local/bin/facet`, and installs the compiled blocking rules. Translate Page also needs the local runtime that `./install.sh` sets up (see below).
+
+### Limits
+
+- No DRM. WebKitGTK ships without Widevine, so services that require it (most paid video streaming) will not play.
+- No browser extensions. The page tools are built in and share their scripts with the Chromium build.
+- Apple-only features have an equivalent or are absent. Absent: Handoff, iCloud Keychain and passkey sync, Touch ID, AirPlay, Siri. Equivalents: local Argos translation in place of Apple's translation, and a local history file in place of synced history.
+- Read aloud needs speech-dispatcher, which is not installed here, so the command is not offered.
+- No settings panel, downloads panel, AI panel or onboarding yet. Downloads save to your Downloads folder with a toast.
+- Link peek checks the host's addresses before each request. A DNS answer that changes between that check and the connection is not covered.
+- Translate Page translates the first 20,000 characters of visible text. The first run for a language pair downloads a model, which can take a minute.
+
+## Chromium build (fallback)
+
+Use this when a site needs something WebKit lacks. It has the full set of features from the first release.
 
 | Area | What you get |
 | --- | --- |
@@ -15,21 +53,22 @@ Facet for Omarchy Linux. This is a native rebuild of the macOS browser's feature
 | Speech | Local live captions with faster-whisper |
 | Translation | Local page and selection translation with Argos Translate |
 
-## Install
-
 Requires Chromium, [uv](https://docs.astral.sh/uv/), and optionally Ollama.
 
 ```sh
 ./install.sh
-facet
+bin/facet
 ```
+
+`./install.sh` also links `~/.local/bin/facet` to the Chromium launcher, so run `./scripts/install-native.sh` last if you want `facet` to open the native app. The Chromium build is always available as `bin/facet`.
 
 The AI panel uses your local Ollama at `127.0.0.1:11434` with no service changes.
 
 ## Architecture
 
-- `extension/` is the Manifest V3 browser layer: sidebar, page tools and AI panel.
-- `native/` is a Chrome native messaging host for speech and translation. It accepts a fixed list of actions from this extension only.
+- `app/` is the native app: `src/main.rs` (window, Spaces, palette, history, link peek, translation), `src/page-shim.js` (the small part of the extension API the page scripts use, backed by a script-message bridge), `src/translate.js`, and `src/style.css`.
+- `extension/` is the Manifest V3 browser layer for Chromium. Its `extension/page/` scripts are shared with the native app.
+- `native/` is a native messaging host for speech and translation. It accepts a fixed list of actions. The native app starts it for Translate Page and speaks the same framing as Chromium.
 - `bin/facet` launches Chromium with a dedicated profile.
 
 Speech and translation run on your machine. Whisper and Argos models download on first use.
